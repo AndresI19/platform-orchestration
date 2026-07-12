@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vmcp-db
+  namespace: platform
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmcp-db
+  namespace: platform
+spec:
+  replicas: 1
+  strategy: { type: Recreate } # a single Postgres owns the volume
+  selector:
+    matchLabels: { app: vmcp-db }
+  template:
+    metadata:
+      labels: { app: vmcp-db }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports: [{ containerPort: 5432 }]
+          envFrom:
+            - secretRef: { name: vmcp-db }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "vmcp", "-d", "vmcp"] }
+            initialDelaySeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: vmcp-db }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmcp-db
+  namespace: platform
+spec:
+  selector: { app: vmcp-db }
+  ports: [{ port: 5432, targetPort: 5432 }]
