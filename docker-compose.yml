@@ -35,11 +35,24 @@ services:
     environment:
       PORT: "8001"
       DATABASE_URL: postgres://vmcp:vmcp@vmcp-db:5432/vmcp
+      # Register rs-mcp-server at its in-network address so it's always attached to the gateway.
+      SEED_URL_RS_MCP: http://rs-mcp-server:8000/sse
+      # Link the dashboard's "← Home" back to the platform home (through the proxy).
+      HOME_URL: /
     depends_on:
       vmcp-db:
         condition: service_healthy
+      rs-mcp-server:
+        condition: service_started
     expose:
       - "8001"
+    networks: [platform]
+    restart: unless-stopped
+
+  rs-mcp-server:
+    build: ../rs-mcp-server
+    expose:
+      - "8000"
     networks: [platform]
     restart: unless-stopped
 
