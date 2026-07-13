@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vmcp
+  namespace: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: vmcp }
+  template:
+    metadata:
+      labels: { app: vmcp }
+    spec:
+      # The image entrypoint runs migrations + seed before serving, so it must not start against a
+      # Postgres that is still booting. A readinessProbe would not cover this — the entrypoint has
+      # already failed by the time the first probe fires. This is compose's `condition:
+      # service_healthy` dependency, expressed the way Kubernetes expresses ordering.
+      initContainers:
+        - name: wait-for-db
+          image: postgres:16
+          command:
+            ["sh", "-c", "until pg_isready -h vmcp-db -U vmcp -d vmcp; do echo waiting for db; sleep 2; done"]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      containers:
+        - name: vmcp
+          image: platform-vmcp:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8001 }]
+          env:
+            - { name: PORT, value: "8001" }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: vmcp-db, key: DATABASE_URL }
+            # Registers rs-mcp-server at its in-cluster address on boot, so the gateway always comes
+            # up with its upstream attached. Absent from the original scaffold, which had no
+            # rs-mcp-server to point at — see rs-mcp-server.yaml.
+            - { name: SEED_URL_RS_MCP, value: "http://rs-mcp-server:8000/sse" }
+            # Read at RUNTIME and served to the dashboard via /vmcp/config.json, so one image works
+            # locally (empty = same-origin) and in production (the API host) with no rebuild. The
+            # public overlay patches the ConfigMap; the image never changes.
+            - name: HOME_URL
+              valueFrom:
+                configMapKeyRef: { name: platform-config, key: HOME_URL }
+            - name: VMCP_API_BASE
+              valueFrom:
+                configMapKeyRef: { name: platform-config, key: VMCP_API_BASE }
+            - name: CORS_ORIGINS
+              valueFrom:
+                configMapKeyRef: { name: platform-config, key: CORS_ORIGINS }
+            - name: MCP_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef: { name: platform-config, key: MCP_PUBLIC_URL }
+          readinessProbe:
+            httpGet: { path: /health, port: 8001 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vmcp
+  namespace: platform
+spec:
+  selector: { app: vmcp }
+  ports: [{ port: 8001, targetPort: 8001 }]

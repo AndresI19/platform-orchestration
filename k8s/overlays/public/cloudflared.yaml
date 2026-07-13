@@ -1,0 +1,42 @@
+# The public front door, ported from compose's `cloudflared` service (profiles: [public]).
+#
+# cloudflared dials OUT to Cloudflare and serves the tunnel from inside the cluster — so there is no
+# port forwarding, no inbound firewall rule, no LoadBalancer, and the home IP is never published in
+# DNS. Cloudflare terminates TLS and routes each public hostname to the nginx Service, which splits
+# them by Host header (see the ConfigMap in ../nginx.yaml).
+#
+# Note what this sidesteps: nothing about the public path depends on the host being able to reach the
+# cluster's network. On this box that is the whole ballgame — minikube runs inside a Colima VM, so
+# `minikube ip` and `minikube tunnel` are not routable from the host at all (see ../README.md). The
+# tunnel works anyway, because it is an outbound connection from a Pod to a Service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: platform
+spec:
+  # Cloudflare treats each connector as an HA replica and load-balances across them, so replicas > 1
+  # is a legitimate way to get a zero-downtime front door — but only once this cluster is the ONLY
+  # thing running a connector for the tunnel. Read the cutover note in ./kustomization.yaml first.
+  replicas: 1
+  selector:
+    matchLabels: { app: cloudflared }
+  template:
+    metadata:
+      labels: { app: cloudflared }
+    spec:
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:latest
+          args: ["tunnel", "--no-autoupdate", "run"]
+          env:
+            # NOT optional, and no placeholder in git: the token is a credential — anyone holding it
+            # can serve traffic as this tunnel. A missing secret should stop the Pod loudly rather
+            # than start a connector that silently serves nothing. Created out-of-band from the
+            # gitignored .env; see ./kustomization.yaml.
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef: { name: cloudflared, key: TUNNEL_TOKEN }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }

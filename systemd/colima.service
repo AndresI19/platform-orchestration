@@ -1,0 +1,31 @@
+# Starts the Colima VM (the Docker runtime) at boot.
+#
+# Why this exists: Docker on this box is not a system daemon — it runs inside a Colima QEMU VM, and
+# Colima does not start itself. The containers' `restart: unless-stopped` policies live INSIDE that
+# VM, so they cannot bring the site back on their own: with the VM down there is no Docker daemon to
+# honour them. Without this unit, every reboot takes project-platform.me offline until someone logs
+# in and types `colima start`.
+#
+# A *user* unit rather than a system one, because the Colima VM and its docker socket belong to this
+# user ($HOME/.config/colima). `loginctl enable-linger` is what lets a user unit start at boot
+# without a login session — see the install steps in the platform-orchestration README.
+[Unit]
+Description=Colima (Docker runtime VM)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Homebrew's bin is not on a systemd unit's default PATH, so colima and its qemu helpers are named
+# absolutely and the PATH is set for the child processes colima spawns.
+Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/linuxbrew/.linuxbrew/bin/colima start
+ExecStop=/home/linuxbrew/.linuxbrew/bin/colima stop
+# Booting a QEMU VM is slow; the default 90s timeout can kill it mid-start.
+TimeoutStartSec=600
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

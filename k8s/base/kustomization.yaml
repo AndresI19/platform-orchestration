@@ -1,0 +1,54 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: platform
+
+# The LOCAL stack — the Kubernetes equivalent of a plain `docker compose up -d`. It is the whole
+# platform except the public front door: cloudflared lives in the `public/` overlay, mirroring
+# compose's `profiles: [public]`, so `kubectl apply -k k8s/` cannot accidentally publish the site.
+# See public/kustomization.yaml for why that separation is load-bearing.
+resources:
+  - namespace.yaml
+  # SealedSecrets, not Secrets. These are ENCRYPTED with the cluster's public key and are safe to
+  # commit: only the sealed-secrets controller (which holds the private key) can decrypt them, and it
+  # will only do so into the namespace + name they were sealed for. Re-seal with:
+  #     kubectl create secret generic <name> -n platform --dry-run=client -o yaml --from-literal=… \
+  #       | kubeseal --format yaml --controller-namespace kube-system > k8s/base/sealed-<name>.yaml
+  - sealed-vmcp-db.yaml # Postgres creds + DATABASE_URL
+  - sealed-platform-secrets.yaml # Discord webhook
+  - config.yaml # non-secret runtime config
+  - content.yaml # PVC holding resume.pdf + the card decks, seeded from the images
+  - vmcp-db.yaml
+  - rs-mcp-server.yaml # the MCP server the gateway fronts
+  - home.yaml
+  - quiz.yaml
+  - vmcp.yaml
+  - fvt-traffic.yaml # keeps the dashboard's Recent Calls populated
+  - nginx.yaml # the router — owns the path map and the vhost split
+  - ingress.yaml # local entry point; hands everything to nginx
+
+# Generated rather than written inline so the ConfigMap's name carries a hash of the conf. Editing
+# nginx.conf then produces a new name, which changes the Pod spec, which rolls the Deployment — the
+# thing a hand-written ConfigMap silently fails to do.
+configMapGenerator:
+  - name: nginx-conf
+    files:
+      - nginx.conf
+
+generatorOptions:
+  # The apps' Deployments reference platform-config by a fixed name, so leave the other generated
+  # names alone; only nginx-conf above is generated, and it wants its hash.
+  disableNameSuffixHash: false
+
+# Set by k8s/deploy.sh. Content-addressed tags: the Pod spec changes
+# whenever the code does, so `kubectl apply` performs a real rolling update.
+images:
+  - name: platform-home
+    newTag: 0fcc7de-dirty.26a80be
+  - name: platform-quiz
+    newTag: 00c8bf3-dirty.a0f56fa
+  - name: platform-vmcp
+    newTag: ece5fa0-dirty.970091d
+  - name: platform-rs-mcp-server
+    newTag: 07cfde7-dirty.3f81e97
+  - name: platform-fvt-traffic
+    newTag: 07cfde7-dirty.3f81e97

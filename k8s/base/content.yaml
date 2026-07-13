@@ -1,0 +1,29 @@
+# Editable content, lifted OUT of the images and onto a volume.
+#
+# resume.pdf and the quiz's card decks used to be baked in, so changing a card's wording or dropping
+# in a new résumé meant rebuilding and reloading a 500MB image. They are content, not code: they
+# change on a different clock than the app that serves them. On this volume they can be replaced with
+# a `kubectl cp` and a rollout restart.
+#
+#   /content/resume.pdf     → mounted into home at /app/dist/client/resume.pdf
+#   /content/cards/*.yaml   → mounted into quiz at /app/cards
+#
+# Seeding: each Deployment carries an initContainer that copies its own baked-in defaults onto the
+# volume IF they are not already there. That keeps the images self-contained (they still run fine
+# standalone, and `docker run` is unaffected), makes a fresh cluster come up populated with no manual
+# step, and — because it only copies when absent — never overwrites content you have since edited.
+#
+# ReadWriteOnce is honest here rather than aspirational: minikube's hostPath provisioner is
+# single-node, and RWO is enforced per NODE, so home and quiz can both mount this concurrently. On a
+# real multi-node cluster this would need RWX (an NFS/CSI class) or one volume per app — flagged in
+# k8s/README.md rather than papered over.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: platform-content
+  namespace: platform
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 256Mi

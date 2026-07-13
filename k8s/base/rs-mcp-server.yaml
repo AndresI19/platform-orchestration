@@ -1,0 +1,43 @@
+# The MCP server the gateway fronts. Missing from the original k8s scaffold, which predated it —
+# without this Deployment, vMCP comes up with SEED_URL_RS_MCP pointing at nothing, registers a dead
+# upstream, and the dashboard shows a gateway with no reachable tools.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rs-mcp-server
+  namespace: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: rs-mcp-server }
+  template:
+    metadata:
+      labels: { app: rs-mcp-server }
+    spec:
+      containers:
+        - name: rs-mcp-server
+          image: platform-rs-mcp-server:latest
+          # Built locally and side-loaded with `minikube image load` — there is no registry behind
+          # this tag, so a pull would fail. See k8s/README.md.
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8000 }]
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 25m, memory: 128Mi }
+            limits: { memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rs-mcp-server
+  namespace: platform
+spec:
+  selector: { app: rs-mcp-server }
+  ports: [{ port: 8000, targetPort: 8000 }]

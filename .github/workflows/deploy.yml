@@ -16,11 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # TODO: check out ../portfolio-home, ../flashcards-app, ../open-vMCP (submodules or extra checkouts).
+      # TODO: check out ../portfolio-home, ../data-driven-quiz-server, ../open-vMCP (submodules or extra checkouts).
       - name: Build images
         run: |
           echo "TODO: docker build -t $REGISTRY/platform-home ../portfolio-home"
-          echo "TODO: docker build -t $REGISTRY/platform-quiz --build-arg BASE_PATH=/cloud-developer-quiz/ ../flashcards-app"
+          echo "TODO: docker build -t $REGISTRY/platform-quiz --build-arg BASE_PATH=/cloud-developer-quiz/ ../data-driven-quiz-server"
           echo "TODO: docker build -t $REGISTRY/platform-vmcp ../open-vMCP"
       # - name: Log in + push
       #   uses: docker/login-action@v3
