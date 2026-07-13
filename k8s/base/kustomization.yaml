@@ -49,7 +49,7 @@ generatorOptions:
 # whenever the code does, so `kubectl apply` performs a real rolling update.
 images:
   - name: platform-home
-    newTag: "c0baa3b"
+    newTag: "6225511"
   - name: platform-quiz
     newTag: "7e72cba"
   - name: platform-vmcp
@@ -59,4 +59,4 @@ images:
   - name: platform-fvt-traffic
     newTag: "91e4dd2"
   - name: platform-platform-auth
-    newTag: "c0baa3b"
+    newTag: "6225511"

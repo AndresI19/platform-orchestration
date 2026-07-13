@@ -93,8 +93,12 @@ CVE-2021-25742. One routing table, not two.
 
 ## Sharp edges
 
-- **This repo has no git remote.** Nothing here is backed up off the machine.
+- **This repo has a private remote** (`AndresI19/platform-orchestration`). The committed `sealed-*.yaml`
+  are safe to publish — they are encrypted — but the gitignored `.env` and the sealed-secrets private
+  key must never be. A security audit (2026-07-13) cleared the history before the first push; the only
+  plaintext secret ever committed was a since-rotated demo DB password in files deleted at the cutover.
 - **The sealed-secrets private key is the only thing that can decrypt the committed `sealed-*.yaml`
-  files.** Recreate the cluster without a backup and they are lost permanently.
+  files.** It is NOT in this repo (verified). Recreate the cluster without a backup of it and the
+  sealed secrets are lost permanently.
 - Colima's default VM (2 CPU / 4 GiB) cannot hold a K8s control plane plus ingress-nginx plus the
   stack. It runs 8 CPU / 16 GiB.
