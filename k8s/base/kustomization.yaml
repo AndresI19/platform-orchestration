@@ -43,12 +43,12 @@ generatorOptions:
 # whenever the code does, so `kubectl apply` performs a real rolling update.
 images:
   - name: platform-home
-    newTag: 0fcc7de-dirty.26a80be
+    newTag: 6f7ddf1-dirty.c2b8d72
   - name: platform-quiz
-    newTag: 00c8bf3-dirty.a0f56fa
+    newTag: b00cab5-dirty.e21da72
   - name: platform-vmcp
-    newTag: ece5fa0-dirty.970091d
+    newTag: 55a29a2-dirty.cbf32c5
   - name: platform-rs-mcp-server
-    newTag: 07cfde7-dirty.3f81e97
+    newTag: 5c4f70e
   - name: platform-fvt-traffic
-    newTag: 07cfde7-dirty.3f81e97
+    newTag: 5c4f70e
