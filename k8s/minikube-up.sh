@@ -52,7 +52,7 @@ minikube addons enable ingress >/dev/null
 echo "    enabled"
 
 echo "==> Building images (Colima's Docker) and side-loading them into the cluster"
-docker build -q -t home ../portfolio-home >/dev/null
+docker build -q -t home ../project-platform/portfolio-home >/dev/null
 docker build -q -t quiz --build-arg BASE_PATH=/cloud-developer-quiz/ ../data-driven-quiz-server >/dev/null
 docker build -q -t vmcp ../open-vMCP >/dev/null
 docker build -q -t rs-mcp-server ../rs-mcp-server >/dev/null

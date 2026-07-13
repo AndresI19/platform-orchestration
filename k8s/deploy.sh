@@ -38,12 +38,12 @@ OVERLAY="${1:-}" # pass "public" to deploy the public overlay instead of the bas
 # app name -> source repo (relative to this repo)
 APPS=(home quiz vmcp rs-mcp-server fvt-traffic platform-auth)
 declare -A REPO=(
-  [home]=../portfolio-home
+  [home]=../project-platform/portfolio-home
   [quiz]=../data-driven-quiz-server
   [vmcp]=../open-vMCP
   [rs-mcp-server]=../rs-mcp-server
   [fvt-traffic]=../rs-mcp-server
-  [platform-auth]=../platform-auth
+  [platform-auth]=../project-platform/platform-auth
 )
 
 # Content-addressed tag. A clean tree is its commit; a dirty tree is its commit plus a hash of the
