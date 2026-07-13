@@ -54,6 +54,11 @@ spec:
               valueFrom:
                 configMapKeyRef: { name: platform-config, key: AUTH_ISSUER }
             - { name: AUTH_AUDIENCE, value: "platform" }
+            # The elevated usernames. A sealed secret, not config: who is an admin is a policy
+            # decision, and changing it should take the same ceremony as changing a signing key.
+            - name: AUTH_ADMINS
+              valueFrom:
+                secretKeyRef: { name: platform-auth, key: AUTH_ADMINS }
           readinessProbe:
             httpGet: { path: /health, port: 8002 }
             initialDelaySeconds: 4
