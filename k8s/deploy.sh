@@ -118,8 +118,10 @@ import subprocess
 path = f"{root}/k8s/base/kustomization.yaml"
 src = open(path).read()
 tags = dict(t.split("=", 1) for t in __import__("os").environ["PLATFORM_TAGS"].split(";") if t)
+# newTag is quoted: an all-digit short SHA (e.g. 6882688) is otherwise read as a YAML number,
+# and kustomize rejects a numeric newTag ("cannot unmarshal number ... into type string").
 block = "images:\n" + "".join(
-    f"  - name: platform-{a}\n    newTag: {tags[a]}\n" for a in apps
+    f'  - name: platform-{a}\n    newTag: "{tags[a]}"\n' for a in apps
 )
 if re.search(r"(?m)^images:\n(?:  .*\n)*", src):
     src = re.sub(r"(?m)^images:\n(?:  .*\n)*", block, src)
