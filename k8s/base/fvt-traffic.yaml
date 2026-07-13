@@ -39,6 +39,13 @@ spec:
             - name: FVT_INTERVAL_SECONDS
               valueFrom:
                 configMapKeyRef: { name: platform-config, key: FVT_INTERVAL_SECONDS }
+            # The runner signs in like anybody else now. It used to forge its own token — an unsigned
+            # base64 blob the gateway accepted because nothing checked. Turning on verification broke
+            # that, which is precisely what verification is for.
+            - { name: AUTH_URL, value: "http://platform-auth:8002" }
+            - name: FVT_CODE
+              valueFrom:
+                secretKeyRef: { name: fvt-auth, key: FVT_CODE }
           resources:
             requests: { cpu: 25m, memory: 128Mi }
             limits: { memory: 512Mi }

@@ -1,0 +1,13 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: fvt-auth
+  namespace: platform
+spec:
+  encryptedData:
+    FVT_CODE: AgBcTNsN30vpBifU0TOTmEDBPBRHKI4QcjYeb062U9EHxPfyAxG+p+2HKm1yjVKnSBFgYMDYOAIh1R49mmwqM6L+fmr/MM1imlZ7Ks+aaUd9qA9pcFLYiCxnJ+JIdUOSBSFUoCElmXZVebiTDMdHzALSgksMuHGe4aL/TQKJXuXiDtpeMN2F0vq1VpjPnVPGsA0Q7zxkY2XT1gKte2B4D8bGcQl/L9IQdqg9au05OvUhcNoqk70EWh51jPKqvQPBr+k5H9WeK8UcdHH09evk7McVk+wkd2ak7P543GeR0gkvLnxGstSMNVMciPVy5HpEq1zFMtAl8i/76Vyz4EQGZa0GJNWNQGV8nwuYhF8NZKE5QlVm+vluGMaBDThzCFQEpMFUw4KKDlsdGZ+Z9kW+pcgWCZskkDalZu/Zq2phFbIdgL9/THCVuv3lx66QREo8HNqIF68obEj5d3d2avNjSVmfjPEI8ozr0MwvcacB66RselMT6ltWn5x4y4syoA5h1mAF0PNKAUxolQdbR7JDvBtOsxdZJZMqYMP7YI+t7i2FZ0GUic9ar5dLCxhr9oLj3Ny0UjuDUfwBmwIdqOFVX1zggGyibaxnppHqBM+zsTAjvpGhTFv50JDHZPHtAR7XZ+qGBD1/EE77yvzGgRkLTxj1jUQ481B/wWqDIp85lSsjlvlDNNIvvwXBDCE1uJH/RcIVGf/fE2hc
+  template:
+    metadata:
+      name: fvt-auth
+      namespace: platform

@@ -1,0 +1,72 @@
+# The identity service. See platform-auth/DESIGN.md.
+#
+# It holds the RSA private key that signs every token on the platform, and the pepper that stands
+# between a stolen database dump and every user's credential. Those are the two most valuable secrets
+# here, and neither exists anywhere in git except as ciphertext.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-auth
+  namespace: platform
+spec:
+  # ONE replica, and that is load-bearing. The rate limiter is an in-process Map, so a second replica
+  # would enforce its own separate limit and quietly double the real ceiling on the only defence the
+  # code has. Scaling this out means moving the limiter to a shared store FIRST.
+  replicas: 1
+  selector:
+    matchLabels: { app: platform-auth }
+  template:
+    metadata:
+      labels: { app: platform-auth }
+    spec:
+      # The entrypoint migrates before it serves, so it must not start against a booting Postgres.
+      initContainers:
+        - name: wait-for-db
+          image: postgres:16
+          command:
+            ["sh", "-c", "until pg_isready -h platform-db -U platform; do echo waiting for db; sleep 2; done"]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      containers:
+        - name: platform-auth
+          image: platform-platform-auth:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8002 }]
+          env:
+            - { name: PORT, value: "8002" }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: platform-auth, key: DATABASE_URL }
+            # The RSA private key. Everything else on the platform holds only the PUBLIC half, fetched
+            # from this service's JWKS endpoint — so a compromised verifier can check a token but
+            # cannot mint one. That is the whole reason for RS256 over a shared HS256 secret.
+            - name: AUTH_SIGNING_KEY
+              valueFrom:
+                secretKeyRef: { name: platform-auth, key: AUTH_SIGNING_KEY }
+            # The HMAC key the codes are hashed under. It must NEVER live alongside the data it
+            # protects: with it, a database dump is enumerable offline in minutes; without it, the
+            # dump is worthless.
+            - name: AUTH_CODE_PEPPER
+              valueFrom:
+                secretKeyRef: { name: platform-auth, key: AUTH_CODE_PEPPER }
+            - name: AUTH_ISSUER
+              valueFrom:
+                configMapKeyRef: { name: platform-config, key: AUTH_ISSUER }
+            - { name: AUTH_AUDIENCE, value: "platform" }
+          readinessProbe:
+            httpGet: { path: /health, port: 8002 }
+            initialDelaySeconds: 4
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 25m, memory: 96Mi }
+            limits: { memory: 384Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-auth
+  namespace: platform
+spec:
+  selector: { app: platform-auth }
+  ports: [{ port: 8002, targetPort: 8002 }]

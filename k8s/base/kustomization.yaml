@@ -15,9 +15,15 @@ resources:
   #       | kubeseal --format yaml --controller-namespace kube-system > k8s/base/sealed-<name>.yaml
   - sealed-vmcp-db.yaml # Postgres creds + DATABASE_URL
   - sealed-platform-secrets.yaml # Discord webhook
+  - sealed-platform-db.yaml # the shared Postgres server's creds
+  - sealed-platform-auth.yaml # RSA signing key + the code pepper. The two most valuable secrets here.
+  - sealed-quiz-db.yaml # the quiz's own database on that server
+  - sealed-fvt-auth.yaml # the traffic runner's sign-in code
   - config.yaml # non-secret runtime config
   - content.yaml # PVC holding resume.pdf + the card decks, seeded from the images
   - vmcp-db.yaml
+  - platform-db.yaml # one server, two databases: auth and quiz. One owner each.
+  - platform-auth.yaml # identity
   - rs-mcp-server.yaml # the MCP server the gateway fronts
   - home.yaml
   - quiz.yaml
@@ -43,12 +49,14 @@ generatorOptions:
 # whenever the code does, so `kubectl apply` performs a real rolling update.
 images:
   - name: platform-home
-    newTag: 6f7ddf1-dirty.c2b8d72
+    newTag: dfb1b08
   - name: platform-quiz
-    newTag: b00cab5-dirty.e21da72
+    newTag: 3e8fc48-dirty.cdf55d9
   - name: platform-vmcp
-    newTag: 55a29a2-dirty.cbf32c5
+    newTag: 3ae864c-dirty.319b24b
   - name: platform-rs-mcp-server
-    newTag: 5c4f70e
+    newTag: 501bf7b-dirty.64eded4
   - name: platform-fvt-traffic
-    newTag: 5c4f70e
+    newTag: 501bf7b-dirty.64eded4
+  - name: platform-platform-auth
+    newTag: 7a44d98-dirty.150af84

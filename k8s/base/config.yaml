@@ -21,6 +21,12 @@ data:
   # this proxy), which is right locally. NOT an in-cluster Service address: the client reading it
   # (Claude Desktop, an SDK) runs outside the cluster, where cluster DNS does not resolve.
   MCP_PUBLIC_URL: ""
+  # The token issuer, as it appears in every JWT's `iss`. It is a public URL because a verifier
+  # anywhere must be able to recognise it — it is an identifier, not an endpoint we call.
+  AUTH_ISSUER: "https://api-andres.project-platform.me/auth"
+  # Where verifiers FETCH the public keys. In-cluster: this one IS an endpoint, it is called
+  # service-to-service, and it never leaves the cluster — so it takes the Service address.
+  AUTH_JWKS_URI: "http://platform-auth:8002/.well-known/jwks.json"
   # How often the FVT runner replays the suite. 14400 = every 4 hours; each run makes ~54 live
   # calls against the RuneScape wiki / GE APIs, so a tighter loop is free traffic against someone
   # else's API for no extra signal.

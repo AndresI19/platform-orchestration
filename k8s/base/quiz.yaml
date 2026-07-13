@@ -39,6 +39,18 @@ spec:
             - { name: PORT, value: "80" }
             # Must match the BASE_PATH baked into the image at build time.
             - { name: BASE_PATH, value: "/cloud-developer-quiz/" }
+            # Progress sync is OPTIONAL: with no DATABASE_URL the quiz runs exactly as it always has,
+            # entirely in the browser. These three switch it on.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: quiz-db, key: DATABASE_URL }
+            - name: AUTH_JWKS_URI
+              valueFrom:
+                configMapKeyRef: { name: platform-config, key: AUTH_JWKS_URI }
+            - name: AUTH_ISSUER
+              valueFrom:
+                configMapKeyRef: { name: platform-config, key: AUTH_ISSUER }
+            - { name: AUTH_AUDIENCE, value: "platform" }
           volumeMounts:
             # Shadows the image's own /app/cards, so the server's hardcoded
             # `CARDS_DIR = resolve(ROOT, 'cards')` reads the volume with no code change.

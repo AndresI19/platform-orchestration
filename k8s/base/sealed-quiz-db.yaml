@@ -1,0 +1,13 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: quiz-db
+  namespace: platform
+spec:
+  encryptedData:
+    DATABASE_URL: AgBLsB3YgFDlTcDE9MxOOImTuBqQE58culoO+CHygmm29r5Us8c5VLSCBs0nLHi/zB1sivvgd1KzEgpud/tIlg/zlcdbQtO6KF5z6DKu80+W6xfh7vZppeP4X3aDvR/fZFxaFX8ygmZ94l+my052tHfKO5oLOECsAhV8IYEKhikoD4ED4byEIFG6AP1uL1awLVljvx6PNH0dg6p/ON/QG5ottdGQ4+a4gYio9pMCyeRKSGz3ge6CnKHcDD9ICq7PtPdzUxOb6WaIvvj0X56EA0JEDBtUbxBI2lDA+A4+qX4Ov8BQLx/rNaVTLet35/hC2e0MD5zWR45Fg5W1pXrZ1JJH7SANwdnvB/Wm3leH1RZe65I37MjSck8jYLrU64FXw6wbIQWoRG2X2oZ82BbyYMYJR0VS2Dc6B9kqK4suMXjUxLno+uYFxZAXb6L5RFVl70xXtRZwpMgWkpQdjqW1R5tNLAzdbaLU8Qs4kdDzajEi/SwB39pUIEe9jCk/7ocOWk1/FkrjclcfNQmlvzIDDDXM0rQ99YAcpYEG2l9hvJRBO7BfavxemUQgOKrHueTb6EXpXSPitfprlRtod6NajFga4EOVkhoOlsQKUjDYziW0QiIWopsmB3QAhEaYdFCppL877SJIYVcWfE/w9fLs+4NTRSZvCLeYiP92deXyU1NHJnPo4DvlBVhwFot0/HZk7/tWuzKoap0wTCL1+SU13bFcQVFnOBbn7pF6sUFvQQWoG7xDJ6hx6UeZ5Q+IeiQ6AwIz2ArMdPU9uYxcmh3BdSkXBFIois4k
+  template:
+    metadata:
+      name: quiz-db
+      namespace: platform
