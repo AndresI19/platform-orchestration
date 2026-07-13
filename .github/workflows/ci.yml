@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# This repo ships manifests, not an image, so the security gate is a Trivy CONFIG scan of the
+# Kubernetes YAML (misconfigurations: missing securityContext, no resource limits, root filesystems,
+# and so on) rather than an image scan.
+#
+# It is REPORT-ONLY for now (exit-code 0): the manifests predate this scan and will have a backlog of
+# best-practice findings, and failing every PR on them before they are hardened would be a wall, not
+# a gate. The findings print in the job log. Flip exit-code to "1" once the manifests are hardened to
+# turn this into a real gate.
+jobs:
+  config-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy config scan (k8s manifests)
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: k8s
+          severity: HIGH,CRITICAL
+          exit-code: "0" # report-only — see the note above
