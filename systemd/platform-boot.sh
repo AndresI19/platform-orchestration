@@ -166,6 +166,17 @@ else
   apiserver_answers || { echo "apiserver still unreachable after repointing kubeconfig" >&2; exit 1; }
 fi
 
+# --- 3b. the registry, and the trust that makes it usable --------------------------------------
+# Before the workloads, because a Deployment whose image lives in the registry cannot start until the
+# node can pull from it. Idempotent: on an ordinary reboot this is a few seconds of "already up".
+#
+# It runs on EVERY boot rather than once at setup because two of the three things it installs — the
+# CA in the colima VM's /etc, and the CA in the node container's /etc — survive a `stop` but are
+# destroyed by a `delete`. Installed by hand, they work right up until the cluster is recreated, and
+# then every pull fails with `x509: certificate signed by unknown authority` and nothing says why.
+STEP="the registry and its CA trust"
+"${REPO}/k8s/registry.sh"
+
 # --- 4. the workloads -------------------------------------------------------------------------
 # Kubernetes restarts these on its own; this does not make them come back, it refuses to report
 # success until they actually have — so `systemctl --user status platform` tells the truth.
