@@ -75,6 +75,22 @@ spec:
               mountPath: /app/dist/client/resume.pdf
               subPath: resume.pdf
               readOnly: true
+            # The whole volume, so the server can read /content/platform-version.json — the version
+            # spec k8s/deploy.sh writes there, and the only way this app can know the PLATFORM's
+            # version (the orchestration repo ships no image, so that version cannot ride in one).
+            #
+            # A second mount of the same volume, and deliberately not a subPath of the single file:
+            # a subPath is resolved ONCE, at mount time, so the container would keep reading the
+            # inode that existed when it started and never see a redeploy rewrite the spec. A
+            # directory mount reflects the volume live, which is what lets a deploy update the
+            # reported version with no rollout of home.
+            #
+            # readOnly, and that is a boundary not a formality: home is a CONSUMER of the deployment
+            # record. A public web server must not be able to rewrite the file that says what is
+            # deployed — which is also why deploy.sh writes it through a separate, ephemeral pod.
+            - name: content
+              mountPath: /content
+              readOnly: true
             # A read-only root filesystem still needs a writable /tmp for the Node runtime.
             - { name: tmp, mountPath: /tmp }
           readinessProbe:

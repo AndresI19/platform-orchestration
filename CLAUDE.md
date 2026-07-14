@@ -81,6 +81,63 @@ systemd/                      colima.service, platform.service, platform-boot.sh
                                 notifies Discord + the desktop at both ends. See README.
 ```
 
+## Versions
+
+`k8s/deploy.sh` is the only thing that decides what version a component is. Per component:
+
+- **in sync with main** → the repo's latest git tag, e.g. `0.1.4`
+- **differs from main** → that tag, suffixed: `0.1.4-snapshot`
+
+"Differs" means uncommitted edits, untracked files, *or* commits not yet on `main` — anything that
+makes the image something other than what `main` describes. The diff is **scoped to the component's
+subtree**, because two components share a repo in two places (`home` + `platform-auth`; `rs-mcp-server`
++ `fvt-traffic`) and editing one must not stamp the other as a snapshot. The tag is repo-wide, because
+that is what a git tag is.
+
+The version reaches the running app as a **file baked into the image** (`ARG VERSION` → `VERSION`),
+which the app reads at startup and serves from `/version`. It is also an OCI label, so an image can be
+identified without running it.
+
+### The platform's own version
+
+**This repo has a version too, and it is the one exception to all of the above.** It ships no image —
+it *is* the description of what gets deployed — so its version has nothing to ride in. Same rule
+(latest tag, `-snapshot` when it differs from main; first tag is `0.1.0`), different delivery: the
+deploy writes `platform-version.json` onto the **PersistentVolume**, next to the résumé and the card
+decks, for the same reason those are there. `home` mounts the volume read-only at `/content`, reads
+the spec **per request**, and serves it as `platform`.
+
+Three things about that are deliberate:
+
+- **Per request, not at startup.** A deploy rewrites the file. Read once at boot, home would report
+  whatever platform version it happened to start with, and need a pointless rollout to tell the truth.
+  Rewriting the spec updates the site with **no rollout at all** — a spec-only deploy takes ~10s.
+- **home mounts `/content` read-only**, and the deploy writes through a separate ephemeral pod. A
+  public web server has no business being able to rewrite the record of what is deployed.
+- **The `/content` mount is a directory, not a `subPath`.** A `subPath` is resolved once at mount
+  time, so the container would keep reading the inode it started with and never see a redeploy.
+
+> **`kubectl cp` carries the local file's mode and owner into the volume.** `mktemp` makes files
+> `0600` owned by whoever ran the deploy, so the spec landed unreadable by home's user and `/version`
+> reported `null` — pointing at a missing file that was right there. `deploy.sh` now `chmod 0644`s it
+> in the writer pod and **asserts the mode** afterwards. Note a `test -r` check would NOT have caught
+> this: the writer runs as root, and root can read a `0600` file.
+
+`GET /version` → `{ version, platform }` · `GET /api/versions` → `{ platform, components: {…} }`.
+`platform` is a sibling of `components`, not one of them: it has no image, no Pod and no Service.
+
+**The version is half the image tag** (`platform-home:0.1.4-b8450b4`), and that is load-bearing, not
+cosmetic. Cutting a git tag changes no source, so on a content-addressed tag alone a release would
+produce an identical tag, skip the build as "content unchanged", skip the cluster push as "already
+present", leave the Pod spec byte-identical — and never deploy. The `VERSION` file *is* image content,
+so it has to be part of the image's identity. A pleasant side effect: `kubectl get deploy` shows the
+running version without opening anything.
+
+The home page displays it. `GET /api/versions` on the home server fans out to every component over
+service DNS and answers as one object; the browser asks once per page load and **never polls** (a
+version cannot change without new pods). The fan-out is server-side because `rs-mcp-server` and
+`platform-auth` have no public `/version` route, and in production the API is a different origin.
+
 ## Why nginx and not Ingress annotations
 
 Routing lives in `k8s/base/nginx.conf`, and the Ingress is a dumb front door that hands it
