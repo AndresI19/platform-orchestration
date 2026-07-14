@@ -14,6 +14,12 @@ spec:
     metadata:
       labels: { app: rs-mcp-server }
     spec:
+      # Unprivileged, non-root, read-only root fs. fsGroup lets uid 1000 write the /tmp emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: rs-mcp-server
           image: platform-rs-mcp-server:latest
@@ -21,6 +27,15 @@ spec:
           # this tag, so a pull would fail. See k8s/README.md.
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8000 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          env:
+            # Read-only root fs: don't try to write .pyc files back next to the source.
+            - { name: PYTHONDONTWRITEBYTECODE, value: "1" }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
           readinessProbe:
             httpGet: { path: /health, port: 8000 }
             initialDelaySeconds: 3
@@ -32,6 +47,8 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 128Mi }
             limits: { memory: 512Mi }
+      volumes:
+        - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service

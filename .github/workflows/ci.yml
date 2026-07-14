@@ -9,10 +9,10 @@ on:
 # Kubernetes YAML (misconfigurations: missing securityContext, no resource limits, root filesystems,
 # and so on) rather than an image scan.
 #
-# It is REPORT-ONLY for now (exit-code 0): the manifests predate this scan and will have a backlog of
-# best-practice findings, and failing every PR on them before they are hardened would be a wall, not
-# a gate. The findings print in the job log. Flip exit-code to "1" once the manifests are hardened to
-# turn this into a real gate.
+# It is a BLOCKING gate (exit-code 1) at HIGH,CRITICAL. Every workload was hardened in the 2026-07-13
+# pass — pod- and container-level securityContext, readOnlyRootFilesystem with writable emptyDir
+# mounts for the paths that genuinely need them — so the scan is clean, and any new manifest that
+# regresses below that bar fails its PR here instead of reaching the cluster.
 jobs:
   config-scan:
     runs-on: ubuntu-latest
@@ -24,7 +24,7 @@ jobs:
           scan-type: config
           scan-ref: k8s
           severity: HIGH,CRITICAL
-          exit-code: "0" # report-only — see the note above
+          exit-code: "1" # blocking — the manifests are hardened; a regression should fail the PR
 
   manifests:
     runs-on: ubuntu-latest

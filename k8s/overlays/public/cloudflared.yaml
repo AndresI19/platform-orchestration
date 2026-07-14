@@ -25,10 +25,21 @@ spec:
     metadata:
       labels: { app: cloudflared }
     spec:
+      # The cloudflared image ships a nonroot user (65532). Run as it on a read-only root fs; fsGroup
+      # lets it write the /tmp emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: cloudflared
           image: cloudflare/cloudflared:latest
           args: ["tunnel", "--no-autoupdate", "run"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           env:
             # NOT optional, and no placeholder in git: the token is a credential — anyone holding it
             # can serve traffic as this tunnel. A missing secret should stop the Pod loudly rather
@@ -37,6 +48,10 @@ spec:
             - name: TUNNEL_TOKEN
               valueFrom:
                 secretKeyRef: { name: cloudflared, key: TUNNEL_TOKEN }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 128Mi }
+      volumes:
+        - { name: tmp, emptyDir: {} }

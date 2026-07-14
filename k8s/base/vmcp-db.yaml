@@ -23,20 +23,53 @@ spec:
     metadata:
       labels: { app: vmcp-db }
     spec:
+      # See platform-db.yaml for the full rationale: uid 999, non-root, read-only root fs, and NO
+      # fsGroup (it would break PGDATA's required 0700). The fix-perms init chowns the writable
+      # emptyDirs to 999 so postgres can open its socket and scratch space.
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        - name: fix-perms
+          image: postgres:16
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"], add: ["CHOWN"] }
+          command: ["sh", "-c", "chown 999:999 /var/run/postgresql /tmp"]
+          volumeMounts:
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
       containers:
         - name: postgres
           image: postgres:16
           ports: [{ containerPort: 5432 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           envFrom:
             - secretRef: { name: vmcp-db }
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
           readinessProbe:
             exec: { command: ["pg_isready", "-U", "vmcp", "-d", "vmcp"] }
             initialDelaySeconds: 5
+          resources:
+            requests: { cpu: 25m, memory: 128Mi }
+            limits: { memory: 512Mi }
       volumes:
         - name: data
           persistentVolumeClaim: { claimName: vmcp-db }
+        - { name: run, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service

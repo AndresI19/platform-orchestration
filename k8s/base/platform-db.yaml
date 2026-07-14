@@ -46,15 +46,50 @@ spec:
     metadata:
       labels: { app: platform-db }
     spec:
+      # Postgres runs as uid 999 (the image's postgres user), non-root, on a read-only root fs.
+      #
+      # Deliberately NO fsGroup: it would recursively chmod the data PV group-writable, and postgres
+      # refuses to start on a PGDATA that is not 0700/0750 ("data directory has invalid permissions").
+      # Keeping fsGroup off preserves the existing data dir's 0700 exactly — no migration, no risk to
+      # live data. The cost is that the writable emptyDirs (socket dir, /tmp) come up owned by root, so
+      # the fix-perms init below chowns them to 999 before postgres starts.
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        - name: fix-perms
+          image: postgres:16
+          # Runs as root ONLY to chown the two emptyDirs to the postgres uid; it touches nothing on
+          # the (read-only) root fs and drops every capability except the CHOWN it needs.
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"], add: ["CHOWN"] }
+          command: ["sh", "-c", "chown 999:999 /var/run/postgresql /tmp"]
+          volumeMounts:
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
       containers:
         - name: postgres
           image: postgres:16
           ports: [{ containerPort: 5432 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           envFrom:
             - secretRef: { name: platform-db }
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
             - { name: init, mountPath: /docker-entrypoint-initdb.d }
+            # Read-only root fs: postgres's unix socket dir and scratch space must be writable.
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
           readinessProbe:
             exec: { command: ["pg_isready", "-U", "platform"] }
             initialDelaySeconds: 5
@@ -66,6 +101,8 @@ spec:
           persistentVolumeClaim: { claimName: platform-db }
         - name: init
           configMap: { name: platform-db-init }
+        - { name: run, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service

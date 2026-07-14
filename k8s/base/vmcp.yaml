@@ -11,6 +11,13 @@ spec:
     metadata:
       labels: { app: vmcp }
     spec:
+      # Unprivileged, non-root, read-only root fs. No PersistentVolume here, so no fsGroup — the only
+      # writable path is the /tmp emptyDir, mounted below.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
       # The image entrypoint runs migrations + seed before serving, so it must not start against a
       # Postgres that is still booting. A readinessProbe would not cover this — the entrypoint has
       # already failed by the time the first probe fires. This is compose's `condition:
@@ -18,6 +25,10 @@ spec:
       initContainers:
         - name: wait-for-db
           image: postgres:16
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           command:
             ["sh", "-c", "until pg_isready -h vmcp-db -U vmcp -d vmcp; do echo waiting for db; sleep 2; done"]
           resources:
@@ -28,6 +39,10 @@ spec:
           image: platform-vmcp:latest
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8001 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           env:
             - { name: PORT, value: "8001" }
             - name: DATABASE_URL
@@ -52,6 +67,9 @@ spec:
             - name: MCP_PUBLIC_URL
               valueFrom:
                 configMapKeyRef: { name: platform-config, key: MCP_PUBLIC_URL }
+          volumeMounts:
+            # A read-only root filesystem still needs a writable /tmp for the Node runtime.
+            - { name: tmp, mountPath: /tmp }
           readinessProbe:
             httpGet: { path: /health, port: 8001 }
             initialDelaySeconds: 5
@@ -59,6 +77,8 @@ spec:
           resources:
             requests: { cpu: 50m, memory: 128Mi }
             limits: { memory: 512Mi }
+      volumes:
+        - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service
