@@ -28,11 +28,23 @@ spec:
     metadata:
       labels: { app: fvt-traffic }
     spec:
+      # Unprivileged, non-root, read-only root fs. fsGroup lets uid 1000 write the /tmp emptyDir the
+      # traffic script uses for its scratch token file.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: fvt-traffic
           image: platform-fvt-traffic:latest
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           env:
+            - { name: PYTHONDONTWRITEBYTECODE, value: "1" }
             # The script already waits on the gateway's /health before its first run, so no
             # initContainer is needed to order this behind vmcp.
             - { name: VMCP_URL, value: "http://vmcp:8001" }
@@ -46,6 +58,10 @@ spec:
             - name: FVT_CODE
               valueFrom:
                 secretKeyRef: { name: fvt-auth, key: FVT_CODE }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
           resources:
             requests: { cpu: 25m, memory: 128Mi }
             limits: { memory: 512Mi }
+      volumes:
+        - { name: tmp, emptyDir: {} }

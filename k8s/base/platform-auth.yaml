@@ -19,10 +19,21 @@ spec:
     metadata:
       labels: { app: platform-auth }
     spec:
+      # Unprivileged, non-root, read-only root fs. No PersistentVolume here, so the only writable path
+      # is the /tmp emptyDir, mounted below.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
       # The entrypoint migrates before it serves, so it must not start against a booting Postgres.
       initContainers:
         - name: wait-for-db
           image: postgres:16
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           command:
             ["sh", "-c", "until pg_isready -h platform-db -U platform; do echo waiting for db; sleep 2; done"]
           resources:
@@ -33,6 +44,10 @@ spec:
           image: platform-platform-auth:latest
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8002 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           env:
             - { name: PORT, value: "8002" }
             - name: DATABASE_URL
@@ -59,6 +74,9 @@ spec:
             - name: AUTH_ADMINS
               valueFrom:
                 secretKeyRef: { name: platform-auth, key: AUTH_ADMINS }
+          volumeMounts:
+            # A read-only root filesystem still needs a writable /tmp for the Node runtime.
+            - { name: tmp, mountPath: /tmp }
           readinessProbe:
             httpGet: { path: /health, port: 8002 }
             initialDelaySeconds: 4
@@ -66,6 +84,8 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 96Mi }
             limits: { memory: 384Mi }
+      volumes:
+        - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service

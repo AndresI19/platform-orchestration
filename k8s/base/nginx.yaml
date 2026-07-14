@@ -28,10 +28,23 @@ spec:
     metadata:
       labels: { app: nginx }
     spec:
+      # nginx:alpine ships a nginx user at uid 101. Run as that user on a read-only root fs; fsGroup
+      # makes the writable emptyDirs below group-owned by 101 so nginx has somewhere to put its pid,
+      # temp files, cache and logs.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: nginx
           image: nginx:1.27-alpine
           ports: [{ containerPort: 8080 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           volumeMounts:
             # subPath so the conf lands as a single file rather than as a directory mount, which
             # would shadow the rest of /etc/nginx (mime.types, conf.d) that the image ships.
@@ -39,6 +52,11 @@ spec:
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
               readOnly: true
+            # A read-only root fs needs writable homes for nginx's pid, temp files, cache and logs.
+            - { name: run, mountPath: /var/run }
+            - { name: cache, mountPath: /var/cache/nginx }
+            - { name: log, mountPath: /var/log/nginx }
+            - { name: tmp, mountPath: /tmp }
           readinessProbe:
             # Probes the router's own view of the home page, so green here means nginx resolved
             # CoreDNS and reached a backend — not merely that the process is listening.
@@ -52,6 +70,10 @@ spec:
         - name: conf
           # kustomize rewrites this to the hashed generated name (nginx-conf-<hash>).
           configMap: { name: nginx-conf }
+        - { name: run, emptyDir: {} }
+        - { name: cache, emptyDir: {} }
+        - { name: log, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service

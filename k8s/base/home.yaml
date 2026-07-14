@@ -11,6 +11,13 @@ spec:
     metadata:
       labels: { app: home }
     spec:
+      # Runs unprivileged, non-root, on a read-only root filesystem. The node user (1000) exists in the
+      # base image; fsGroup lets it write the content volume that the seed step below populates.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
       # Copies the image's baked-in résumé onto the content volume, once. `cp -n` (no-clobber) means
       # a restart never stamps the image's version back over a résumé you have since replaced.
       #
@@ -24,6 +31,10 @@ spec:
           imagePullPolicy: IfNotPresent
           command:
             ["sh", "-c", "cp -n /app/dist/client/resume.pdf /content/resume.pdf || true; ls -l /content/resume.pdf"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           volumeMounts:
             - { name: content, mountPath: /content }
           resources:
@@ -52,6 +63,10 @@ spec:
                   name: platform-secrets
                   key: DISCORD_WEBHOOK_URL
                   optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
           volumeMounts:
             # A single-file mount over the static bundle's résumé, so /resume.pdf is served from the
             # volume with no code change. Mounting the whole dist/client directory would shadow the
@@ -60,6 +75,8 @@ spec:
               mountPath: /app/dist/client/resume.pdf
               subPath: resume.pdf
               readOnly: true
+            # A read-only root filesystem still needs a writable /tmp for the Node runtime.
+            - { name: tmp, mountPath: /tmp }
           readinessProbe:
             httpGet: { path: /api/health, port: 3000 }
             initialDelaySeconds: 3
@@ -70,6 +87,7 @@ spec:
       volumes:
         - name: content
           persistentVolumeClaim: { claimName: platform-content }
+        - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service
