@@ -25,3 +25,24 @@ jobs:
           scan-ref: k8s
           severity: HIGH,CRITICAL
           exit-code: "0" # report-only — see the note above
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Render every overlay and schema-validate it — the "lint" for a Kustomize platform. kustomize
+      # build catches a broken/unresolvable overlay; kubeconform -strict catches an invalid manifest
+      # (a typo'd apiVersion, a misindented field) before it ever reaches the cluster. SealedSecret is
+      # a CRD with no public schema, so -ignore-missing-schemas skips it rather than erroring.
+      - name: Install kustomize + kubeconform
+        run: |
+          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" | tar xz
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz" | tar xz kubeconform
+          sudo mv kustomize kubeconform /usr/local/bin/
+      - name: Render + schema-validate every overlay
+        run: |
+          set -euo pipefail
+          for overlay in k8s k8s/overlays/public; do
+            echo "== $overlay =="
+            kustomize build "$overlay" | kubeconform -strict -ignore-missing-schemas -summary -
+          done
