@@ -5,8 +5,16 @@
 # change on a different clock than the app that serves them. On this volume they can be replaced with
 # a `kubectl cp` and a rollout restart.
 #
-#   /content/resume.pdf     → mounted into home at /app/dist/client/resume.pdf
-#   /content/cards/*.yaml   → mounted into quiz at /app/cards
+#   /content/resume.pdf              → mounted into home at /app/dist/client/resume.pdf
+#   /content/cards/*.yaml            → mounted into quiz at /app/cards
+#   /content/platform-version.json   → the version spec, written by k8s/deploy.sh and read by home
+#
+# The version spec is the one item here that is not hand-edited content: it is WRITTEN BY THE DEPLOY
+# and records what that deploy put on the cluster. It is on this volume for the same reason as the
+# rest of it, though — the platform's own version belongs to the orchestration repo, which ships no
+# image, so unlike every component's version it has nothing to be baked into. home mounts the volume
+# read-only and serves it at /version; deploy.sh writes it through a separate ephemeral pod, because a
+# public web server should not be able to rewrite the record of what is deployed.
 #
 # Seeding: each Deployment carries an initContainer that copies its own baked-in defaults onto the
 # volume IF they are not already there. That keeps the images self-contained (they still run fine

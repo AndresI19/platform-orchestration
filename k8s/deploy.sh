@@ -59,6 +59,36 @@ declare -A REPO=(
   [platform-auth]=../project-platform/platform-auth
 )
 
+# ---------------------------------------------------------------------------------------------
+# VERSION: the human-readable half of the identity, and what the component reports at /version.
+#
+#   in sync with main → the repo's latest git tag              e.g. 0.1.4
+#   differs from main → that tag, suffixed                     e.g. 0.1.4-snapshot
+#
+# "Differs from main" means uncommitted edits, untracked files, OR commits not yet on main — anything
+# that makes the built image something other than what main describes.
+#
+# The diff is SCOPED TO THE COMPONENT'S SUBTREE, deliberately. Two components share one repo in two
+# places (home + platform-auth in project-platform; rs-mcp-server + fvt-traffic in rs-mcp-server), so
+# a repo-wide diff would stamp platform-auth as a snapshot merely because the home page was edited.
+# The tag, by contrast, IS repo-wide — that is what a git tag is.
+component_version() {
+  local path="$1" root rel base ref changes
+  root="$(git -C "$path" rev-parse --show-toplevel)"
+  rel="$(realpath --relative-to="$root" "$path")"
+  # Latest tag reachable from HEAD; a repo that has never been tagged starts at 0.0.0.
+  base="$(git -C "$root" describe --tags --abbrev=0 2>/dev/null || echo 0.0.0)"
+  # origin/main, not main: the question is "does this differ from what is ON main", and the local
+  # main branch can itself be stale — on this box it was, by three merged PRs.
+  ref=origin/main
+  git -C "$root" rev-parse --verify -q "$ref" >/dev/null || ref=main
+  # `git diff <ref> -- <path>` compares the WORKING TREE to the ref, so one command covers both
+  # unpushed commits and uncommitted edits. Untracked files change the image too, so they count.
+  changes="$( { git -C "$root" diff "$ref" --name-only -- "$rel"
+                git -C "$root" ls-files --others --exclude-standard -- "$rel"; } )"
+  [ -n "$changes" ] && echo "${base}-snapshot" || echo "$base"
+}
+
 # Content-addressed tag. A clean tree is its commit; a dirty tree is its commit plus a hash of the
 # diff, so two different working states can never share a tag.
 content_tag() {
@@ -89,11 +119,29 @@ push_to_cluster() {
     || { echo "FATAL: $img is not in the cluster after load" >&2; exit 1; }
 }
 
-declare -A TAG
+declare -A TAG VERSION
+BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# THIS repo has a version too, by exactly the same rule — and it is the only component that ships no
+# image. It is not a service; it is the description of the platform (manifests, routing, secrets,
+# boot), and it is the thing that decides what everything else is. So it cannot carry its version in
+# an image the way the others do. It is written onto the PersistentVolume instead (see below), which
+# is the same reasoning the résumé and the card decks are on there: content that changes on a
+# different clock than the code that serves it.
+PLATFORM_VERSION="$(component_version "$ROOT")"
+echo "==> Platform ${PLATFORM_VERSION}"
+
 echo "==> Building"
 for app in "${APPS[@]}"; do
   repo="${REPO[$app]}"
-  TAG[$app]="$(content_tag "$repo")"
+  VERSION[$app]="$(component_version "$repo")"
+  # The version is HALF THE TAG, not just a label, and that is load-bearing. Cutting a git tag does
+  # not change a single byte of source — so on a content-addressed tag alone, releasing 0.1.4 → 0.1.5
+  # would produce the identical tag, skip the build as "content unchanged", skip the push as "already
+  # in cluster", leave the Pod spec byte-identical, and never deploy. The version IS image content
+  # (it is baked into the VERSION file), so it has to be part of the image's identity.
+  # Bonus: `kubectl get deploy` now shows the running version without opening anything.
+  TAG[$app]="${VERSION[$app]}-$(content_tag "$repo")"
   img="platform-${app}:${TAG[$app]}"
 
   if docker image inspect "$img" >/dev/null 2>&1; then
@@ -101,10 +149,15 @@ for app in "${APPS[@]}"; do
     continue
   fi
 
+  # Every image takes the same three OCI args. VERSION is the one with teeth: the Dockerfile writes it
+  # to a VERSION file that the app reads at startup and serves from /version.
+  args=(--build-arg "VERSION=${VERSION[$app]}"
+        --build-arg "GIT_SHA=$(git -C "$repo" rev-parse --short HEAD)"
+        --build-arg "BUILD_DATE=${BUILD_DATE}")
   case "$app" in
-    quiz) docker build -q -t "$img" --build-arg BASE_PATH=/cloud-developer-quiz/ "$repo" >/dev/null ;;
-    fvt-traffic) docker build -q -t "$img" -f "$repo/Dockerfile.fvt" "$repo" >/dev/null ;;
-    *) docker build -q -t "$img" "$repo" >/dev/null ;;
+    quiz) docker build -q -t "$img" "${args[@]}" --build-arg BASE_PATH=/cloud-developer-quiz/ "$repo" >/dev/null ;;
+    fvt-traffic) docker build -q -t "$img" "${args[@]}" -f "$repo/Dockerfile.fvt" "$repo" >/dev/null ;;
+    *) docker build -q -t "$img" "${args[@]}" "$repo" >/dev/null ;;
   esac
   echo "    $img"
 done
@@ -155,6 +208,80 @@ fi
 
 echo "==> Waiting for rollouts"
 kubectl -n platform wait --for=condition=available --timeout=300s deploy --all
+
+# ---------------------------------------------------------------------------------------------
+# The version spec: what this deploy actually put on the cluster, written where the platform can
+# read it back.
+#
+# Every other component carries its version INSIDE its image. This one cannot — the orchestration
+# repo ships no image — so the platform's own version travels on the PersistentVolume, next to the
+# résumé and the card decks. Same reasoning: it is content, not code, and it changes on a different
+# clock than the app that serves it. The home page reads it from there and serves it at /version and
+# /api/versions.
+#
+# Writing it needs a pod, because the volume only exists inside the cluster. home mounts /content
+# READ-ONLY (it is a consumer of this file, and a web server has no business being able to rewrite
+# the record of what is deployed), so `kubectl cp` into home would fail. An ephemeral writer that
+# mounts the PVC read-write is the same pattern platform-ops/pv-content.sh uses to replace the
+# résumé — busybox:1.36 deliberately, because that image is already in the node and needs no pull.
+#
+# The spec records the component tags as well as the platform version. The endpoint only serves the
+# platform version today, but the expensive half of this is spinning the pod, not the extra keys —
+# and a file on the volume saying exactly what was deployed, and when, is worth having.
+echo "==> Writing the version spec onto the volume"
+SPEC="$(mktemp -t platform-version-XXXXXX.json)"
+trap 'rm -f "$SPEC"' EXIT
+{
+  printf '{\n  "platform": "%s",\n  "deployedAt": "%s",\n  "components": {\n' "$PLATFORM_VERSION" "$BUILD_DATE"
+  sep=""
+  for app in "${APPS[@]}"; do
+    printf '%s    "%s": { "version": "%s", "image": "platform-%s:%s" }' \
+      "$sep" "$app" "${VERSION[$app]}" "$app" "${TAG[$app]}"
+    sep=$',\n'
+  done
+  printf '\n  }\n}\n'
+} > "$SPEC"
+
+WRITER=version-writer
+kubectl -n platform delete pod "$WRITER" --ignore-not-found --now >/dev/null 2>&1 || true
+kubectl -n platform apply -f - >/dev/null <<YAML
+apiVersion: v1
+kind: Pod
+metadata: { name: $WRITER, namespace: platform, labels: { app: pv-writer } }
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: w
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 300"]
+      volumeMounts: [{ name: content, mountPath: /content }]
+  volumes:
+    - name: content
+      persistentVolumeClaim: { claimName: platform-content }
+YAML
+kubectl -n platform wait --for=condition=Ready "pod/$WRITER" --timeout=90s >/dev/null
+kubectl -n platform cp "$SPEC" "platform/$WRITER:/content/platform-version.json"
+
+# `kubectl cp` is a tar stream: it carries the LOCAL file's mode and owner into the volume. mktemp
+# creates 0600 owned by whoever ran this script, so without this the spec lands unreadable by the home
+# container, which runs as a different user — and the endpoint reports `null` forever, blaming a
+# missing file that is right there. Found exactly that way. 0644: everything on this volume is public
+# content, and home mounts it read-only anyway.
+kubectl -n platform exec "$WRITER" -- chmod 0644 /content/platform-version.json
+
+# Prove it landed AND that home will be able to read it, rather than trusting a cp that reported
+# success. The mode is asserted rather than a `test -r`, because this writer runs as root: root can
+# read a 0600 file, so `test -r` would pass happily on exactly the broken state described above. The
+# question is whether a DIFFERENT user can read it, and that is a question about the mode.
+kubectl -n platform exec "$WRITER" -- sh -c \
+  '[ "$(stat -c %a /content/platform-version.json)" = "644" ]' \
+  || { echo "FATAL: the version spec is not on the volume, or home cannot read it" >&2; exit 1; }
+kubectl -n platform delete pod "$WRITER" --now >/dev/null 2>&1 || true
+echo "    platform-version.json → platform ${PLATFORM_VERSION}"
+
+# home reads the spec per REQUEST, not at startup, so it needs no restart to notice this — which is
+# the whole point of the file living on the volume rather than in the image.
 
 echo "==> Deployed"
 kubectl -n platform get deploy -o custom-columns='NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image' --no-headers | sed 's/^/    /'
