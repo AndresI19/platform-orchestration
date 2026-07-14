@@ -1,0 +1,35 @@
+# Starts the platform — and therefore the public site — at boot, and announces it.
+#
+# Why this exists: Kubernetes restarts the workloads on its own, but nothing restarts KUBERNETES. The
+# minikube node is a container inside Colima's QEMU VM, and neither the VM nor the node comes up by
+# itself. Without this unit, every reboot takes project-platform.me offline until someone logs in and
+# types `colima start && minikube start` — which is exactly what happened on 2026-07-14.
+#
+# A *user* unit, like colima.service, because the Colima VM, the docker socket ($HOME/.config/colima),
+# the kubeconfig this writes, and the session bus the desktop notification goes to all belong to this
+# user. `loginctl enable-linger` is what lets a user unit start at boot with no login session —
+# WITHOUT IT THIS UNIT WILL NOT RUN AT BOOT. See the install steps in the README.
+[Unit]
+Description=Platform (minikube cluster + public site)
+# After= is ordering only and would not pull Colima in; Requires= makes the dependency real. With the
+# VM down there is no docker daemon for the node container to exist in.
+After=colima.service
+Requires=colima.service
+# The script's first act is to post "booting" to a Discord webhook, so it wants a route out.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/git-workspace/claude-workspace/platform-orchestration/systemd/platform-boot.sh
+ExecStop=/home/linuxbrew/.linuxbrew/bin/minikube stop
+# Booting a QEMU VM, then a Kubernetes control plane inside it, then ten deployments is slow — a cold
+# boot measured ~5 minutes. The default 90s timeout would kill it mid-start.
+TimeoutStartSec=900
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
