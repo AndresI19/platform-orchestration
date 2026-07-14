@@ -67,6 +67,8 @@ decrypt secret` — not a permission you can grant. A Helm chart in a new namesp
 k8s/
 ├── kustomization.yaml        thin pointer at base/
 ├── minikube-up.sh            cold-boot bring-up
+├── deploy.sh                 build → publish → pin → apply. THE only supported deploy.
+├── registry.sh               the registry + the CA trust both docker daemons need. Idempotent.
 ├── secrets.sh                seal / show / recover / list
 ├── base/                     the local stack
 │   ├── nginx.conf            ← THE ROUTING TABLE. Path map + Host split. Read this first.
@@ -145,6 +147,44 @@ The home page displays it. `GET /api/versions` on the home server fans out to ev
 service DNS and answers as one object; the browser asks once per page load and **never polls** (a
 version cannot change without new pods). The fan-out is server-side because `rs-mcp-server` and
 `platform-auth` have no public `/version` route, and in production the API is a different origin.
+
+## The image registry, and the trust that makes it usable
+
+`k8s/registry.sh` — idempotent, run by **both** boot paths (`minikube-up.sh` and `platform-boot.sh`),
+and safe to run by hand. A no-op takes ~2s.
+
+It owns three things, and only the first is obvious:
+
+1. a `registry:2` container serving **TLS** on minikube's docker network, at a **pinned** `192.168.49.10`
+2. our CA, trusted by the **colima VM's** docker daemon — the one that **pushes**
+3. our CA, trusted by the **minikube node's** docker daemon — the one that **pulls** for the kubelet
+
+**Why it runs on every boot instead of being a setup step.** (2) lives in the colima VM's `/etc` and
+(3) in the node container's `/etc`. Both survive a `stop`; both are **destroyed by a `delete`**.
+Installed by hand they work perfectly — right up until the cluster is recreated, when every pull
+fails with `x509: certificate signed by unknown authority` and nothing in git explains why. That is
+the same failure shape as the systemd units that existed as files nobody had ever installed.
+
+**Why TLS and not `--insecure-registry`.** Docker refuses a plain-HTTP registry no matter how
+reachable it is — reachability and trust are different problems. `--insecure-registry` is only
+accepted by minikube at **cluster creation**, so taking it would mean `minikube delete`, destroying
+the sealed-secrets keypair. A CA we issue ourselves is read from
+`/etc/docker/certs.d/registry:5000/ca.crt` with **no daemon restart and no cluster recreate**.
+
+Sharp edges, each of which has already bitten once:
+
+- **Trust is compared by fingerprint, not by presence.** A stale CA from a previous generation is
+  worse than none: it fails identically while looking installed.
+- **The registry's IP is pinned.** Colima's daemon is not on minikube's network, so it cannot resolve
+  container names and needs an `/etc/hosts` entry — and docker reassigns IPs on restart. Unpinned,
+  a restart silently sends pushes to whatever container took the old address.
+- **The CA private key is deliberately NOT in the VM mount** (`.registry-ca/`, not `.platform-vm/`).
+  Anything that can read it can mint a trusted cert for any host on this machine.
+- **Colima mounts exactly one host directory** (`.platform-vm/`), narrowed from its default of all of
+  `$HOME`. A path outside it does not exist inside the VM: a bind mount of it silently resolves to an
+  **empty directory** — which is how this registry first crash-looped, from `/tmp`. The narrowing is
+  what stops any container (notably a future CI runner holding the docker socket) from bind-mounting
+  `~/.ssh`, `.env`, or the sealed-secrets master key.
 
 ## Why nginx and not Ingress annotations
 

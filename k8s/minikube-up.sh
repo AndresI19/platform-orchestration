@@ -51,6 +51,12 @@ echo "==> ingress addon"
 minikube addons enable ingress >/dev/null
 echo "    enabled"
 
+# The registry and — the half that is easy to forget — the CA trust that makes it usable. Both the
+# colima VM's docker daemon and the node's hold that trust in an /etc that a `delete` destroys, so it
+# has to be reinstalled by whatever recreates the cluster. That is this script. Run after
+# `minikube start`, because the registry attaches to the network minikube creates.
+./k8s/registry.sh
+
 echo "==> Building images (Colima's Docker) and side-loading them into the cluster"
 docker build -q -t home ../project-platform/portfolio-home >/dev/null
 docker build -q -t quiz --build-arg BASE_PATH=/cloud-developer-quiz/ ../data-driven-quiz-server >/dev/null
