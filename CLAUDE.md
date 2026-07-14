@@ -40,7 +40,13 @@ IP (`192.168.49.2:8443`) into kubeconfig.
 - Consequences: build images with Colima's Docker and `minikube image load` them (not
   `docker-env`); reach the cluster with `port-forward` (not `minikube ip`).
 
-`systemd/minikube-boot.sh` and `k8s/minikube-up.sh` already handle all of this.
+`systemd/platform-boot.sh` and `k8s/minikube-up.sh` already handle all of this.
+
+A corollary that costs six minutes if you miss it: **`minikube status` is not a usable health gate
+here.** It probes that same unroutable IP, so it reports the cluster unhealthy even while the site is
+serving — and code that gates `minikube start` on it will start an already-healthy cluster, which then
+sits through the full `apiserver healthz never reported healthy` timeout before giving up. Gate on
+`docker ps` + a `kubectl get --raw /healthz` after the repoint, as `platform-boot.sh` does.
 
 **2. A ConfigMap change does not restart the pods that read it.** `platform-config` reaches the apps
 as *environment variables*, which are read once at container start. After changing it:
@@ -70,7 +76,9 @@ k8s/
 │   ├── sealed-*.yaml         encrypted secrets — safe to commit
 │   └── home|quiz|vmcp|vmcp-db|rs-mcp-server|fvt-traffic.yaml
 └── overlays/public/          + cloudflared. THIS SERVES THE LIVE SITE.
-systemd/                      colima.service, minikube.service, minikube-boot.sh
+systemd/                      colima.service, platform.service, platform-boot.sh
+                              ↑ boot + reboot recovery. platform-boot.sh is idempotent and
+                                notifies Discord + the desktop at both ends. See README.
 ```
 
 ## Why nginx and not Ingress annotations

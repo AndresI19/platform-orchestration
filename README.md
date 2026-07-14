@@ -88,14 +88,44 @@ handle it, and both are needed:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp systemd/colima.service systemd/minikube.service ~/.config/systemd/user/
+cp systemd/colima.service systemd/platform.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable colima.service minikube.service
+systemctl --user enable colima.service platform.service
 sudo loginctl enable-linger "$USER"   # WITHOUT THIS, user units do not start at boot
 ```
 
-`loginctl enable-linger` is the part people miss: a user unit otherwise waits for an interactive
-login, so the site would stay down after a reboot until someone signed in.
+**Copying the units into the repo is not installing them.** Both halves above are load-bearing, and
+on 2026-07-14 a reboot took the site down because neither had been run: the units existed here, in
+git, where systemd never looks. Verify with `systemctl --user is-enabled platform` and
+`loginctl show-user "$USER" -p Linger` — the answers must be `enabled` and `Linger=yes`.
+
+`loginctl enable-linger` is the half people miss: a user unit otherwise waits for an interactive
+login, so the site stays down after a reboot until someone signs in.
+
+`platform.service` runs [`systemd/platform-boot.sh`](systemd/platform-boot.sh), which is also the
+by-hand recovery command — it is idempotent, and re-running it against a healthy stack costs ~4s:
+
+```bash
+./systemd/platform-boot.sh     # Colima → minikube → repoint kubeconfig → wait → verify the live site
+```
+
+A cold boot takes ~5 minutes, nearly all of it Colima's VM and the K8s control plane. It announces
+both ends of the trip to Discord and to the desktop:
+
+| | Discord | Desktop toast |
+|---|---|---|
+| **Start** | 🔄 booting, with hostname + uptime | best-effort — see below |
+| **Finish** | ✅ up, with duration, pod count, and a per-route check of the live site | same |
+| **Failure** | ❌ which step failed, and the `journalctl` line to run | urgency=critical |
+
+The two channels are not equally reliable, and the script leans on the difference. Discord is
+reachable as soon as the network is. The desktop toast needs `org.freedesktop.Notifications`, owned
+by gnome-shell — which under linger does not exist yet when the machine boots, so `platform-boot.sh`
+waits up to 2 minutes for a session to appear and sends the opening toast in the background rather
+than making the site wait for a human to log in. **Discord is the channel that will actually deliver
+a boot message.** Set `DISCORD_WEBHOOK_URL` in `.env` (or `PLATFORM_BOOT_WEBHOOK_URL` to send boot
+alerts somewhere other than the home page's greeting channel); with neither set, the script logs and
+carries on. A notification failure never fails a boot.
 
 ## Dev environment
 
