@@ -72,8 +72,13 @@ declare -A REPO=(
 # places (home + platform-auth in project-platform; rs-mcp-server + fvt-traffic in rs-mcp-server), so
 # a repo-wide diff would stamp platform-auth as a snapshot merely because the home page was edited.
 # The tag, by contrast, IS repo-wide — that is what a git tag is.
+#
+# Extra arguments are git pathspecs appended to the diff — in practice, exclusions. See the call for
+# PLATFORM_VERSION below, which is the only user of them and explains why.
 component_version() {
-  local path="$1" root rel base ref changes
+  local path="$1"; shift
+  local extra=("$@")
+  local root rel base ref changes
   root="$(git -C "$path" rev-parse --show-toplevel)"
   rel="$(realpath --relative-to="$root" "$path")"
   # Latest tag reachable from HEAD; a repo that has never been tagged starts at 0.0.0.
@@ -84,8 +89,8 @@ component_version() {
   git -C "$root" rev-parse --verify -q "$ref" >/dev/null || ref=main
   # `git diff <ref> -- <path>` compares the WORKING TREE to the ref, so one command covers both
   # unpushed commits and uncommitted edits. Untracked files change the image too, so they count.
-  changes="$( { git -C "$root" diff "$ref" --name-only -- "$rel"
-                git -C "$root" ls-files --others --exclude-standard -- "$rel"; } )"
+  changes="$( { git -C "$root" diff "$ref" --name-only -- "$rel" "${extra[@]}"
+                git -C "$root" ls-files --others --exclude-standard -- "$rel" "${extra[@]}"; } )"
   [ -n "$changes" ] && echo "${base}-snapshot" || echo "$base"
 }
 
@@ -128,7 +133,20 @@ BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # an image the way the others do. It is written onto the PersistentVolume instead (see below), which
 # is the same reasoning the résumé and the card decks are on there: content that changes on a
 # different clock than the code that serves it.
-PLATFORM_VERSION="$(component_version "$ROOT")"
+#
+# kustomization.yaml is EXCLUDED from the platform's own diff, and it has to be. This script writes
+# the image pins into that file — so a deploy dirties the very repo it is versioning, and the platform
+# would report `-snapshot` from the moment it was first deployed, forever, without anybody having
+# touched it. The version would then be measuring "have you deployed recently" rather than "what is
+# this", which is worthless.
+#
+# The justification is that the pins are an OUTPUT of a deploy, not a description of the platform:
+# they record what was deployed; they do not change what the platform IS. Every other file here does.
+#
+# The cost, stated plainly: a HAND edit to kustomization.yaml — adding a resource, say — no longer
+# marks the platform as a snapshot. That is a real hole. It is the narrower one, though: the
+# alternative is a version that is permanently and uninformatively "-snapshot".
+PLATFORM_VERSION="$(component_version "$ROOT" ':!k8s/base/kustomization.yaml')"
 echo "==> Platform ${PLATFORM_VERSION}"
 
 echo "==> Building"

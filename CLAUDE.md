@@ -117,6 +117,14 @@ Three things about that are deliberate:
 - **The `/content` mount is a directory, not a `subPath`.** A `subPath` is resolved once at mount
   time, so the container would keep reading the inode it started with and never see a redeploy.
 
+> **The platform's diff EXCLUDES `k8s/base/kustomization.yaml`, and must.** `deploy.sh` writes the
+> image pins into that file — so a deploy dirties the very repo it versions, and the platform would
+> report `-snapshot` from its first deploy onward, forever, with nobody having touched it. The version
+> would be measuring "have you deployed recently" instead of "what is this". The pins are an *output*
+> of a deploy, not a description of the platform. The cost, stated plainly: a hand edit to
+> `kustomization.yaml` no longer marks the platform as a snapshot. That is a real hole, and the
+> narrower one.
+
 > **`kubectl cp` carries the local file's mode and owner into the volume.** `mktemp` makes files
 > `0600` owned by whoever ran the deploy, so the spec landed unreadable by home's user and `/version`
 > reported `null` — pointing at a missing file that was right there. `deploy.sh` now `chmod 0644`s it
