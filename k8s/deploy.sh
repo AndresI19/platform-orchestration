@@ -30,7 +30,7 @@
 #
 # BOOTSTRAP FIRST: the namespace, SealedSecrets and the three PVCs are NOT in the chart (they are in
 # k8s/bootstrap/, applied with kubectl). They must exist before the first deploy — the version-writer
-# hook mounts the content PVC, and --wait/--atomic will roll back if it cannot. See k8s/README.md.
+# hook mounts the content PVC, and --wait/--rollback-on-failure will roll back if it cannot. See k8s/README.md.
 # ---------------------------------------------------------------------------------------------
 set -euo pipefail
 
@@ -172,7 +172,7 @@ done
 #
 # The tags and versions become --set values, so the release is the single source of truth for what is
 # deployed, `helm history platform` records every revision, and `helm rollback platform` reverts both
-# the images AND (via the post-rollback hook) the reported version. --atomic rolls a failed deploy back
+# the images AND (via the post-rollback hook) the reported version. --rollback-on-failure rolls a failed deploy back
 # on its own; --wait blocks until every workload AND the version-writer hook are done, so a version
 # write that home cannot read fails the deploy loudly rather than silently.
 echo "==> Deploying (helm upgrade --install platform)"
@@ -187,7 +187,7 @@ VALUES=()
 helm upgrade --install platform "$ROOT/chart" \
   --namespace platform --create-namespace \
   "${VALUES[@]}" "${HELM_SET[@]}" \
-  --wait --atomic --timeout 5m
+  --wait --rollback-on-failure --timeout 5m
 
 echo "==> Deployed  (platform ${PLATFORM_VERSION})"
 kubectl -n platform get deploy -o custom-columns='NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image' --no-headers | sed 's/^/    /'
