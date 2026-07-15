@@ -1,31 +1,30 @@
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: vmcp-db
-  namespace: platform
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 1Gi
+{{- /*
+The Postgres servers. Their PVCs are bootstrap (k8s/bootstrap/pvcs.yaml) so Helm never risks the
+data — these own the Deployment + Service, and platform-db additionally seeds its two databases via
+an init.sql ConfigMap that Postgres runs ONCE on an empty volume.
+
+Both run as uid 999 (the image's postgres user) with NO fsGroup — fsGroup would recursively make
+PGDATA group-writable and Postgres refuses to start on anything but 0700. The cost is that the
+writable emptyDirs come up root-owned, so a root fix-perms init chowns them to 999 first.
+*/ -}}
+{{- range $name, $db := .Values.databases }}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vmcp-db
-  namespace: platform
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $name }}
 spec:
   replicas: 1
   strategy: { type: Recreate } # a single Postgres owns the volume
   selector:
-    matchLabels: { app: vmcp-db }
+    matchLabels: { app: {{ $name }} }
   template:
     metadata:
-      labels: { app: vmcp-db }
+      labels: { app: {{ $name }} }
     spec:
-      # See platform-db.yaml for the full rationale: uid 999, non-root, read-only root fs, and NO
-      # fsGroup (it would break PGDATA's required 0700). The fix-perms init chowns the writable
-      # emptyDirs to 999 so postgres can open its socket and scratch space.
       securityContext:
         runAsUser: 999
         runAsGroup: 999
@@ -54,28 +53,47 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
           envFrom:
-            - secretRef: { name: vmcp-db }
+            - secretRef: { name: {{ $db.secretName }} }
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
+            {{- if $db.initSql }}
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+            {{- end }}
             - { name: run, mountPath: /var/run/postgresql }
             - { name: tmp, mountPath: /tmp }
           readinessProbe:
-            exec: { command: ["pg_isready", "-U", "vmcp", "-d", "vmcp"] }
+            exec: { command: {{ $db.probe | toJson }} }
             initialDelaySeconds: 5
           resources:
             requests: { cpu: 25m, memory: 128Mi }
             limits: { memory: 512Mi }
       volumes:
         - name: data
-          persistentVolumeClaim: { claimName: vmcp-db }
+          persistentVolumeClaim: { claimName: {{ $db.pvcName }} }
+        {{- if $db.initSql }}
+        - name: init
+          configMap: { name: {{ $name }}-init }
+        {{- end }}
         - { name: run, emptyDir: {} }
         - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: vmcp-db
-  namespace: platform
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
 spec:
-  selector: { app: vmcp-db }
+  selector: { app: {{ $name }} }
   ports: [{ port: 5432, targetPort: 5432 }]
+{{- if $db.initSql }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-init
+  namespace: {{ $.Release.Namespace }}
+data:
+  init.sql: |
+{{ $db.initSql | indent 4 }}
+{{- end }}
+{{- end }}

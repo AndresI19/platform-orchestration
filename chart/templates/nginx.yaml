@@ -1,0 +1,80 @@
+{{- /*
+The router. Its routing table is chart/files/nginx.conf — the single source of routing truth (Host
+split, read-only public dashboard API, the /api → /vmcp/api rewrite), things an Ingress cannot express
+without configuration-snippet. The conf is inlined into a ConfigMap, and a checksum/config annotation
+on the pod template rolls the Deployment whenever the conf changes — reproducing what kustomize's
+configMapGenerator hash did (Helm has no generator).
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-conf
+  namespace: {{ .Release.Namespace }}
+data:
+  nginx.conf: |
+{{ .Files.Get "files/nginx.conf" | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: nginx }
+  template:
+    metadata:
+      labels: { app: nginx }
+      annotations:
+        # Rolls the Deployment when nginx.conf changes — the plain-ConfigMap failure mode is a silent
+        # "apply succeeded, nothing restarted, old routing still serving".
+        checksum/config: {{ .Files.Get "files/nginx.conf" | sha256sum }}
+    spec:
+      # nginx:alpine ships a nginx user at uid 101. fsGroup makes the writable emptyDirs group-owned by
+      # 101 so nginx has somewhere for its pid, temp, cache and logs on a read-only root fs.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: nginx
+          image: {{ .Values.nginx.image }}
+          ports: [{ containerPort: 8080 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: conf, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf, readOnly: true }
+            - { name: run, mountPath: /var/run }
+            - { name: cache, mountPath: /var/cache/nginx }
+            - { name: log, mountPath: /var/log/nginx }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      volumes:
+        - name: conf
+          configMap: { name: nginx-conf }
+        - { name: run, emptyDir: {} }
+        - { name: cache, emptyDir: {} }
+        - { name: log, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector: { app: nginx }
+  ports: [{ port: 8080, targetPort: 8080 }]

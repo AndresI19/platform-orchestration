@@ -1,0 +1,94 @@
+# The identity the CI/CD runner deploys as.
+#
+# It is NOT the admin kubeconfig, and it deliberately cannot be. The runner is a container; the
+# host's kubeconfig authenticates with client certificates under ~/.minikube, which sits OUTSIDE the
+# one directory colima mounts into the VM — so no container can read them. Rather than widen that
+# mount (the thing that stops a CI job reading ~/.ssh, the tunnel token and the sealed-secrets master
+# key), the runner gets an identity of its own, scoped to exactly what a deploy does.
+#
+# What a deploy does, and therefore all this may do:
+#   * `helm upgrade` the release: apply Deployments/Services/ConfigMaps/Ingress and watch the rollout
+#   * read and write the Helm RELEASE-STATE Secret (sh.helm.release.v1.platform.*) Helm keeps in-namespace
+#   * run the version-writer hook Job (writes platform-version.json onto the content PV)
+#
+# THE SECRETS TRADE, stated plainly. Helm stores release state as a Secret, and `helm upgrade` cannot
+# work without reading and writing it — so this identity is granted `secrets`, which necessarily also
+# lets it read the app secrets (Postgres passwords, the auth signing key, the tunnel token). That is a
+# deliberate widening of the original "the deployer cannot read Secrets" boundary, accepted because this
+# is a single-developer platform on one trusted machine: the threat that boundary guarded — a shared or
+# hosted runner exfiltrating secrets — does not apply here. It is still NOT cluster-admin, and it still
+# cannot touch Roles, RoleBindings, ServiceAccounts or SealedSecrets — those are bootstrap, applied by
+# the human out-of-band, so a job on the runner cannot grant itself more or rewrite an identity.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deployer
+  namespace: platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deployer
+  namespace: platform
+rules:
+  # helm upgrade server-side-applies each workload and watches the rollout. `watch` is NOT optional:
+  # `--wait` opens a WATCH, and without it the wait fails and --atomic does a FALSE rollback of a deploy
+  # that actually succeeded. create/delete because SSA may create a missing object and helm prunes.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch", "update", "patch", "delete"]
+  # helm --wait watches Pods; the version-writer hook runs as a Job that spawns one.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list"]
+  # Server-side apply of the chart's Services, ConfigMaps and Ingress.
+  - apiGroups: [""]
+    resources: ["services", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The version-writer is a Helm hook Job.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Helm's release state lives in Secrets (sh.helm.release.v1.platform.*). Granting this necessarily
+  # also grants reading every app secret in this namespace — see THE SECRETS TRADE above.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: deployer
+  namespace: platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: deployer
+subjects:
+  - kind: ServiceAccount
+    name: deployer
+    namespace: platform
+---
+# Kubernetes 1.24+ stopped auto-creating a token Secret for a ServiceAccount, and the runner needs a
+# long-lived credential it can carry in a kubeconfig (a TokenRequest token expires and the runner has
+# no way to refresh it mid-job). This asks the control plane to mint one and keep it.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: deployer-token
+  namespace: platform
+  annotations:
+    kubernetes.io/service-account.name: deployer
+type: kubernetes.io/service-account-token

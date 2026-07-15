@@ -1,0 +1,18 @@
+{{- /*
+The non-secret runtime config the apps read as env. Local defaults are same-origin (empty);
+values-public.yaml points the cross-origin ones at the real hostnames. Changing this does NOT restart
+the apps that read it (env is read once at start) — `kubectl rollout restart` after, or redeploy.
+
+The SECRET half (platform-secrets → DISCORD_WEBHOOK_URL) is deliberately NOT declared anywhere: a
+committed placeholder would render empty and clobber the real webhook on every apply. Its consumers
+mark the key optional, so its absence is fine.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-config
+  namespace: {{ .Release.Namespace }}
+data:
+  {{- range $k, $v := .Values.config }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

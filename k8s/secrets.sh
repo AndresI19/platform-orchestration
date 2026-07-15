@@ -15,7 +15,7 @@
 # secrets at RUNTIME. Sealed Secrets pushes them in at APPLY time.)
 #
 # THE SCOPING TRAP. Our SealedSecrets are strict-scoped, meaning each is cryptographically bound to
-# BOTH its namespace and its name. Applying k8s/base/sealed-vmcp-db.yaml into a namespace other than
+# BOTH its namespace and its name. Applying k8s/bootstrap/sealed-vmcp-db.yaml into a namespace other than
 # `platform` does not fail with a permissions error you can grant your way out of — the controller
 # simply cannot decrypt it, because the namespace is part of what was encrypted. A chart installed
 # into a new namespace needs its OWN seal:
@@ -30,7 +30,7 @@
 #   seal <name> [-n NS] [-o FILE] KEY=VALUE | KEY=@ENV_VAR ...
 #       Seals a new SealedSecret. KEY=@ENV_VAR reads the value from .env instead of the command
 #       line, so credentials never land in your shell history. Defaults: -n platform,
-#       -o k8s/base/sealed-<name>.yaml.
+#       -o k8s/bootstrap/sealed-<name>.yaml.
 #
 #   show <name> [-n NS]
 #       Prints the LIVE Secret's decoded values. This reads the cluster, not the sealed file — and
@@ -79,7 +79,7 @@ cmd_seal() {
     esac
   done
   [ ${#args[@]} -gt 0 ] || die "no KEY=VALUE pairs given"
-  [ -n "$out" ] || out="k8s/base/sealed-${name}.yaml"
+  [ -n "$out" ] || out="k8s/bootstrap/sealed-${name}.yaml"
 
   # --dry-run: the plaintext Secret is only ever a stream on a pipe. It is never applied, and never
   # written to disk — the only artefact is the encrypted output.
@@ -88,7 +88,7 @@ cmd_seal() {
     > "$out"
 
   echo "sealed $NS/$name -> $out  (strict scope: locked to this namespace AND name)"
-  echo "add it to the relevant kustomization.yaml, then: kubectl apply -k <dir>"
+  echo "then apply it: kubectl apply -f k8s/bootstrap/"
 }
 
 cmd_show() {

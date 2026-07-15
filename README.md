@@ -26,9 +26,11 @@ None of that is expressible in a stock Ingress. See `k8s/README.md`.
 ## Run it
 
 ```bash
-./k8s/minikube-up.sh                              # Colima → minikube → build+load images → apply
+./k8s/minikube-up.sh                              # Colima → minikube → registry → bootstrap → deploy (helm)
 kubectl -n platform port-forward svc/nginx 8081:8080
 # http://localhost:8081/   /cloud-developer-quiz/   /vmcp/   /mcp
+./k8s/deploy.sh                                   # redeploy after a code change
+helm history platform ; helm rollback platform <n>   # release history + rollback
 ```
 
 The cluster has **no host-routable IP** — minikube runs inside a Colima QEMU VM, so `minikube ip` and
@@ -38,8 +40,9 @@ the single most confusing thing about this setup.
 
 ## The public site
 
-`kubectl apply -k k8s/overlays/public/` adds the cloudflared connector and repoints the apps at the
-real hostnames. It is already applied — **project-platform.me is served from this cluster.**
+`./k8s/deploy.sh public` (which layers `chart/values-public.yaml`) adds the cloudflared connector and
+repoints the apps at the real hostnames. It is already applied — **project-platform.me is served from
+this cluster.**
 
 | Host | Serves |
 | --- | --- |

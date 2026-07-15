@@ -8,39 +8,39 @@ there is one way to run the platform now.
 ## Layout
 
 ```
+chart/                          the Helm chart — the platform's topology, ONE release named `platform`
+├── values.yaml                 local defaults; image tags + versions come from deploy.sh --set
+├── values-public.yaml          + cloudflared and the real hostnames — the public site
+├── files/nginx.conf            THE ROUTING TABLE — path map + vhost split
+└── templates/                  _app.tpl + apps.yaml (the six apps), postgres.yaml (the two dbs),
+                                nginx.yaml, cloudflared.yaml, config.yaml, ingress.yaml,
+                                hooks/version-writer.yaml (writes platform-version.json to the PVC)
 k8s/
-├── kustomization.yaml          thin pointer at base/, so `kubectl apply -k k8s/` works
-├── minikube-up.sh              cold-boot bring-up (handles the two gotchas below)
-├── base/                       the local stack
-│   ├── namespace.yaml
-│   ├── sealed-vmcp-db.yaml     Postgres creds — ENCRYPTED, safe to commit
-│   ├── sealed-platform-secrets.yaml  Discord webhook — ENCRYPTED, safe to commit
-│   ├── config.yaml             non-secret runtime config
-│   ├── content.yaml            PVC: resume.pdf + the card decks, seeded from the images
-│   ├── vmcp-db.yaml            Postgres: Deployment + PVC + Service
-│   ├── rs-mcp-server.yaml      the MCP server the gateway fronts
-│   ├── home.yaml / quiz.yaml / vmcp.yaml
-│   ├── fvt-traffic.yaml        replays the FVT suite through the gateway on an interval
-│   ├── nginx.conf              THE ROUTING TABLE — path map + vhost split
-│   ├── nginx.yaml              the router: Deployment + Service
-│   └── ingress.yaml            local entry point; hands everything to nginx
-└── overlays/
-    └── public/                 + cloudflared — the public front door. Read its cutover note first.
-        ├── cloudflared.yaml
-        └── kustomization.yaml
+├── minikube-up.sh              cold-boot bring-up (delegates to deploy.sh)
+├── deploy.sh                   build → side-load → helm upgrade --install. THE deploy.
+├── registry.sh · secrets.sh
+└── bootstrap/                  applied once with kubectl, deliberately NOT owned by Helm:
+    ├── namespace.yaml
+    ├── deployer-rbac.yaml      the least-privilege CI identity
+    ├── pvcs.yaml               the three PVCs — kept out of Helm so the data is never at risk
+    └── sealed-*.yaml           encrypted secrets — safe to commit
 ```
 
 ## Bring it up
 
 ```bash
-./k8s/minikube-up.sh          # cold boot: Colima → minikube → images → apply
+./k8s/minikube-up.sh          # cold boot: Colima → minikube → registry → bootstrap → deploy
 kubectl -n platform port-forward svc/nginx 8081:8080
 ```
 
 Then `http://localhost:8081/`, `/cloud-developer-quiz/`, `/vmcp/`, and `/mcp`.
 
-Secrets come up with the stack — they are sealed into the manifests, so there is no out-of-band
-`kubectl create secret` step. See [Secrets are sealed](#secrets-are-sealed).
+To redeploy after a code change: `./k8s/deploy.sh`. Every deploy is a Helm release — `helm history
+platform` lists the revisions and `helm rollback platform <n>` reverts (images *and* the reported
+version move together). Secrets and the PVCs are **bootstrap**: `kubectl apply -f k8s/bootstrap/` once,
+before the first deploy (`minikube-up.sh` does this for you). The secrets are sealed into those
+manifests, so there is no out-of-band `kubectl create secret` step. See
+[Secrets are sealed](#secrets-are-sealed).
 
 ## Two things that are not what the minikube docs say
 
@@ -82,10 +82,10 @@ unaffected — cloudflared dials *out* from inside the cluster, so it never need
 
 | Compose | Kubernetes | Why |
 | --- | --- | --- |
-| `nginx` + `nginx/nginx.conf` | `nginx.yaml` + `base/nginx.conf` as a generated ConfigMap | The conf stays the single routing table. See below. |
+| `nginx` + `nginx/nginx.conf` | `nginx.yaml` + `files/nginx.conf` inlined into a ConfigMap, rolled by a checksum annotation | The conf stays the single routing table. See below. |
 | `resolver 127.0.0.11` (Docker DNS) | `resolver 10.96.0.10` (CoreDNS) + **FQDN upstreams** | nginx's resolver ignores `/etc/resolv.conf` search domains, so short names like `home` would NXDOMAIN. Every upstream is now `home.platform.svc.cluster.local`. |
 | `depends_on: condition: service_healthy` | `initContainer` running `pg_isready` | vMCP's entrypoint migrates+seeds before serving, so it must not start against a booting Postgres. A readinessProbe is too late — the entrypoint has already failed. |
-| `profiles: [public]` | `overlays/public/` | Same opt-in semantics, enforced structurally: a default `apply -k k8s/` cannot publish the site. |
+| `profiles: [public]` | `values-public.yaml` (`./k8s/deploy.sh public`) | Same opt-in semantics: a plain `./k8s/deploy.sh` cannot publish the site — cloudflared is gated on a value that is off by default. |
 | `.env` interpolation | `platform-config` ConfigMap + `platform-secrets` Secret | Same runtime-config contract: one image serves local and public, the overlay patches config rather than rebuilding. |
 | n/a | `absolute_redirect off` | **New.** nginx built absolute `Location:` headers from its listen port and `$scheme`. Invisible under compose (published port was also 8080, dev was http); through a port-forward it redirected to a dead port, and behind Cloudflare's TLS termination it would bounce https visitors to `http://`. |
 
@@ -104,10 +104,11 @@ None of those are expressible in a stock Ingress — they need `configuration-sn
 default since CVE-2021-25742. So routing lives in exactly one file and the Ingress is a dumb front
 door that hands everything to nginx.
 
-The ConfigMap is **generated** (`configMapGenerator`) so its name carries a hash of the conf. Editing
-`nginx.conf` changes the name, which changes the Pod spec, which rolls the Deployment. A hand-written
-ConfigMap updates in place while the running nginx keeps serving the old routing table — `apply`
-reports success and nothing happens.
+The chart hashes `files/nginx.conf` into a `checksum/config` annotation on the pod template, so editing
+the conf changes the Pod spec, which rolls the Deployment. (kustomize did this by hashing the conf into
+the ConfigMap's *name* via `configMapGenerator`; Helm has no generator, so the checksum annotation is
+the equivalent.) Without such a trigger, a ConfigMap updates in place while the running nginx keeps
+serving the old routing table — `apply` reports success and nothing happens.
 
 ## Secrets are sealed
 
@@ -193,8 +194,9 @@ need RWX (an NFS/CSI class) or one volume per app.
 
 ## The public site
 
-`overlays/public/` adds cloudflared and repoints the apps at the real hostnames. **It is applied —
-project-platform.me is served from this cluster**, and the compose connector is gone.
+`values-public.yaml` (deploy with `./k8s/deploy.sh public`) adds cloudflared and repoints the apps at
+the real hostnames. **It is applied — project-platform.me is served from this cluster**, and the
+compose connector is gone.
 
 If you ever run a second connector (another host, a rebuilt cluster), understand what that does:
 Cloudflare treats every connector registered against a tunnel as an HA replica and load-balances
@@ -206,8 +208,8 @@ reach the pods as **environment variables**, which are read once at container st
 overlay therefore does *not* restart the pods that consume them:
 
 ```bash
-kubectl apply -k k8s/overlays/public/
-kubectl -n platform rollout restart deploy/home deploy/vmcp   # or they keep the local config
+./k8s/deploy.sh public
+kubectl -n platform rollout restart deploy/home deploy/vmcp   # ConfigMap env is read once at start
 ```
 
 ## Still rough before any non-local use
