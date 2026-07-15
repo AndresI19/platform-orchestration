@@ -7,15 +7,18 @@
 # key), the runner gets an identity of its own, scoped to exactly what a deploy does.
 #
 # What a deploy does, and therefore all this may do:
-#   * patch a Deployment's image, and watch the rollout            (the deploy itself)
-#   * undo a rollout                                               (the failure path)
-#   * read Deployments                                             (rebuild the version spec from live state)
-#   * create/delete a Pod and exec into it                         (write platform-version.json onto the PV)
+#   * `helm upgrade` the release: apply Deployments/Services/ConfigMaps/Ingress and watch the rollout
+#   * read and write the Helm RELEASE-STATE Secret (sh.helm.release.v1.platform.*) Helm keeps in-namespace
+#   * run the version-writer hook Job (writes platform-version.json onto the content PV)
 #
-# What it may NOT do, and this is the point: read Secrets. A runner executing code from a public repo
-# must not be able to read the sealed secrets' decrypted values, the Postgres passwords, or the
-# Cloudflare tunnel token — all of which live as Secrets in this namespace. Deploying an image does
-# not require reading them, so it cannot.
+# THE SECRETS TRADE, stated plainly. Helm stores release state as a Secret, and `helm upgrade` cannot
+# work without reading and writing it — so this identity is granted `secrets`, which necessarily also
+# lets it read the app secrets (Postgres passwords, the auth signing key, the tunnel token). That is a
+# deliberate widening of the original "the deployer cannot read Secrets" boundary, accepted because this
+# is a single-developer platform on one trusted machine: the threat that boundary guarded — a shared or
+# hosted runner exfiltrating secrets — does not apply here. It is still NOT cluster-admin, and it still
+# cannot touch Roles, RoleBindings, ServiceAccounts or SealedSecrets — those are bootstrap, applied by
+# the human out-of-band, so a job on the runner cannot grant itself more or rewrite an identity.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -28,31 +31,41 @@ metadata:
   name: deployer
   namespace: platform
 rules:
-  # The deploy: set the image, then watch it land. `watch` is NOT optional: `kubectl rollout status`
-  # opens a WATCH on the Deployment, and without it the command fails with "cannot watch", times out,
-  # and deploy.sh does a FALSE rollback of a deploy that actually succeeded. (Fast rollouts that finish
-  # on the first `get` hid this — they never reached the watch — which is why home/quiz/vmcp slipped
-  # through and platform-auth did not.)
+  # helm upgrade server-side-applies each workload and watches the rollout. `watch` is NOT optional:
+  # `--wait` opens a WATCH, and without it the wait fails and --atomic does a FALSE rollback of a deploy
+  # that actually succeeded. create/delete because SSA may create a missing object and helm prunes.
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    verbs: ["get", "list", "watch", "patch", "update"]
-  # `kubectl rollout undo` reads and patches the ReplicaSets behind a Deployment, and rollout status
-  # watches them too.
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["replicasets"]
-    verbs: ["get", "list", "watch", "patch", "update"]
-  # `rollout status` watches Pods; the version spec is written by an ephemeral pod this creates.
+    verbs: ["get", "list", "watch", "update", "patch", "delete"]
+  # helm --wait watches Pods; the version-writer hook runs as a Job that spawns one.
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch", "create", "delete"]
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
-  # The writer pod mounts the content PVC; creating it requires being able to see the claim.
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["get", "list"]
-  # Deliberately absent: secrets. See the note above — this is the whole reason for a scoped identity.
+  # Server-side apply of the chart's Services, ConfigMaps and Ingress.
+  - apiGroups: [""]
+    resources: ["services", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The version-writer is a Helm hook Job.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Helm's release state lives in Secrets (sh.helm.release.v1.platform.*). Granting this necessarily
+  # also grants reading every app secret in this namespace — see THE SECRETS TRADE above.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
