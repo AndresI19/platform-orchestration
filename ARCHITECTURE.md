@@ -27,7 +27,7 @@ namespace, one Cloudflare tunnel. This is a description of what exists, not a pl
 ║                                   │ http (plain — TLS ended at Cloudflare)            ║
 ║                          ┌────────▼────────┐                                          ║
 ║       Ingress ─────────► │  nginx  :8080   │  ◄── THE ROUTER. Splits by Host AND path ║
-║   (local access only)    └───┬────┬────┬───┘      Config: k8s/base/nginx.conf         ║
+║   (local access only)    └───┬────┬────┬───┘      Config: chart/files/nginx.conf      ║
 ║                              │    │    │                                              ║
 ║          ┌───────────────────┘    │    └────────────────┐                             ║
 ║          │                        │                     │                             ║
@@ -128,7 +128,7 @@ That is exactly why `fvt-traffic` targets the per-slug route: the test suite ass
 
 ## 4. Public hostnames
 
-All three arrive on `nginx:8080` and are split by `Host` header (`k8s/base/nginx.conf`).
+All three arrive on `nginx:8080` and are split by `Host` header (`chart/files/nginx.conf`).
 
 | Host | Serves | Notes |
 | --- | --- | --- |
@@ -180,13 +180,12 @@ Nothing is published to the host. Local access is `kubectl port-forward svc/ngin
 - **Secrets are sealed** (`sealed-*.yaml`), encrypted with the cluster's public key and safe to
   commit. The controller decrypts them into real `Secret` objects at apply time. Managed via
   `./k8s/secrets.sh`. They are strict-scoped: bound cryptographically to namespace **and** name.
-- **Config is a plain ConfigMap** (`platform-config`), patched to public values by the
-  `overlays/public/` overlay. `VMCP_API_BASE`, `CORS_ORIGINS`, `HOME_URL`, `FVT_INTERVAL_SECONDS`.
+- **Config is a plain ConfigMap** (`platform-config`), set to public values by `values-public.yaml`.
+  `VMCP_API_BASE`, `CORS_ORIGINS`, `HOME_URL`, `FVT_INTERVAL_SECONDS`.
 
 Because those reach the pods as **environment variables**, changing the ConfigMap does *not* restart
-the pods that read them — `rollout restart` is required. (The nginx conf is different: it is a
-*generated* ConfigMap whose name carries a content hash, so editing it rolls the Deployment on its
-own.)
+the pods that read them — `rollout restart` is required. (The nginx conf is different: the chart hashes
+it into a `checksum/config` pod annotation, so editing it rolls the Deployment on its own.)
 
 ---
 
@@ -194,7 +193,7 @@ own.)
 
 | Repo | Role | Stack |
 | --- | --- | --- |
-| `platform-orchestration` | This repo. Manifests, routing, secrets, boot. | Kubernetes / Kustomize |
+| `platform-orchestration` | This repo. Chart, routing, secrets, boot. | Kubernetes / Helm |
 | `portfolio-home` | The home page. **Owns `@platform/ui`**, the shared design system. | TS, Vite, Express |
 | `data-driven-quiz-server` | The quiz. Vendors `@platform/ui` as a git submodule. | TS, Vite, Express, zod |
 | `open-vMCP` | The MCP gateway + Carbon dashboard. | TS, Express 5, React, Postgres, Drizzle |

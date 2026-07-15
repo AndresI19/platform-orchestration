@@ -14,13 +14,22 @@ stack, who talks to whom, and every port.
 ## Commands
 
 ```bash
-./k8s/minikube-up.sh                              # cold boot: Colima → minikube → build+load → apply
-kubectl apply -k k8s/                             # the local stack
-kubectl apply -k k8s/overlays/public/             # + the public cloudflared front door
+./k8s/minikube-up.sh                              # cold boot: Colima → minikube → registry → bootstrap → deploy
+kubectl apply -f k8s/bootstrap/                   # namespace, sealed secrets, PVCs, deployer RBAC (once, before deploy)
+./k8s/deploy.sh                                   # build → side-load → helm upgrade --install. THE only deploy.
+./k8s/deploy.sh public                            # + the public cloudflared front door (values-public.yaml)
 kubectl -n platform port-forward svc/nginx 8081:8080   # local access — see below
 
+helm history platform                             # release revisions
+helm rollback platform <n>                        # revert to a revision — images AND reported version move together
+helm template platform chart                      # render without applying
 ./k8s/secrets.sh seal|show|recover|list           # secrets; run with no args for usage
-kubectl kustomize k8s/                            # render without applying
+```
+
+## Pre-PR checks
+
+```bash
+helm lint chart
 ```
 
 ## Three things that will waste your time if you don't know them
@@ -52,35 +61,46 @@ sits through the full `apiserver healthz never reported healthy` timeout before 
 as *environment variables*, which are read once at container start. After changing it:
 `kubectl -n platform rollout restart deploy/home deploy/vmcp`.
 
-The nginx conf is the exception — it is a **generated** ConfigMap (`configMapGenerator`) whose name
-carries a content hash, so editing `k8s/base/nginx.conf` changes the Pod spec and rolls the
-Deployment automatically. That is deliberate; don't convert it to a plain ConfigMap.
+The nginx conf is the exception — the chart hashes `chart/files/nginx.conf` into a `checksum/config`
+annotation on the pod template, so editing the conf changes the Pod spec and rolls the Deployment
+automatically. (This replaces kustomize's `configMapGenerator` hashed name — Helm has no generator.)
+Don't remove the annotation.
 
 **3. Sealed secrets are strict-scoped.** Each is bound cryptographically to its namespace *and*
 name. Applying `sealed-vmcp-db.yaml` into another namespace fails with `ErrUnsealFailed: no key could
-decrypt secret` — not a permission you can grant. A Helm chart in a new namespace needs its own seal:
-`./k8s/secrets.sh seal <name> -n <ns> -o <file> KEY=@ENV_VAR`.
+decrypt secret` — not a permission you can grant. This is exactly why the SealedSecrets live in
+`k8s/bootstrap/` and are NOT in the Helm chart: the chart keeps the namespace `platform` and every
+Secret name unchanged, so the existing seals work as-is. Moving to a NEW namespace would need
+re-sealing every one: `./k8s/secrets.sh seal <name> -n <ns> -o <file> KEY=@ENV_VAR`.
 
 ## Layout
 
 ```
+chart/                        the Helm chart — the platform's topology, ONE release named `platform`
+├── Chart.yaml
+├── values.yaml               local defaults; image tags + versions come from deploy.sh --set
+├── values-public.yaml        + cloudflared and the real hostnames. THIS SERVES THE LIVE SITE.
+├── files/nginx.conf          ← THE ROUTING TABLE. Path map + Host split. Read this first.
+└── templates/
+    ├── _app.tpl              generic Deployment(+Service) renderer for the six apps
+    ├── apps.yaml             ranges over .Values.apps
+    ├── postgres.yaml         platform-db + vmcp-db
+    ├── nginx.yaml            the router + its ConfigMap (checksum-rolled)
+    ├── cloudflared.yaml      gated on .Values.cloudflared.enabled
+    ├── config.yaml · ingress.yaml
+    └── hooks/version-writer.yaml   writes platform-version.json onto the content PVC
 k8s/
-├── kustomization.yaml        thin pointer at base/
-├── minikube-up.sh            cold-boot bring-up
-├── deploy.sh                 build → publish → pin → apply. THE only supported deploy.
+├── minikube-up.sh            cold-boot bring-up (delegates to deploy.sh)
+├── deploy.sh                 build → side-load → helm upgrade --install. THE only supported deploy.
 ├── registry.sh               the registry + the CA trust both docker daemons need. Idempotent.
 ├── secrets.sh                seal / show / recover / list
-├── base/                     the local stack
-│   ├── nginx.conf            ← THE ROUTING TABLE. Path map + Host split. Read this first.
-│   ├── nginx.yaml            the router (Deployment + Service)
-│   ├── ingress.yaml          local entry point only; hands everything to nginx
-│   ├── content.yaml          PVC: resume.pdf + card decks
-│   ├── sealed-*.yaml         encrypted secrets — safe to commit
-│   └── home|quiz|vmcp|vmcp-db|rs-mcp-server|fvt-traffic.yaml
-└── overlays/public/          + cloudflared. THIS SERVES THE LIVE SITE.
+└── bootstrap/                applied once with kubectl, deliberately NOT owned by Helm:
+    ├── namespace.yaml
+    ├── deployer-rbac.yaml    the least-privilege CI identity
+    ├── pvcs.yaml             the three PVCs — kept out of Helm so the data is never at risk
+    └── sealed-*.yaml         encrypted secrets — safe to commit
 systemd/                      colima.service, platform.service, platform-boot.sh
-                              ↑ boot + reboot recovery. platform-boot.sh is idempotent and
-                                notifies Discord + the desktop at both ends. See README.
+                              ↑ boot + reboot recovery. See README.
 ```
 
 ## Versions
@@ -114,24 +134,26 @@ Three things about that are deliberate:
 - **Per request, not at startup.** A deploy rewrites the file. Read once at boot, home would report
   whatever platform version it happened to start with, and need a pointless rollout to tell the truth.
   Rewriting the spec updates the site with **no rollout at all** — a spec-only deploy takes ~10s.
-- **home mounts `/content` read-only**, and the deploy writes through a separate ephemeral pod. A
-  public web server has no business being able to rewrite the record of what is deployed.
+- **home mounts `/content` read-only**, and the write happens through a separate pod — the
+  version-writer Helm hook (`post-install,post-upgrade,post-rollback`), which mounts the PVC
+  read-write. A public web server has no business rewriting the record of what is deployed.
 - **The `/content` mount is a directory, not a `subPath`.** A `subPath` is resolved once at mount
   time, so the container would keep reading the inode it started with and never see a redeploy.
 
-> **The platform's diff EXCLUDES `k8s/base/kustomization.yaml`, and must.** `deploy.sh` writes the
-> image pins into that file — so a deploy dirties the very repo it versions, and the platform would
-> report `-snapshot` from its first deploy onward, forever, with nobody having touched it. The version
-> would be measuring "have you deployed recently" instead of "what is this". The pins are an *output*
-> of a deploy, not a description of the platform. The cost, stated plainly: a hand edit to
-> `kustomization.yaml` no longer marks the platform as a snapshot. That is a real hole, and the
-> narrower one.
+> **A deploy no longer dirties this repo — the old `-snapshot`-forever hole is CLOSED by the Helm
+> migration.** deploy.sh used to write image pins into a tracked `kustomization.yaml`, so it had to
+> EXCLUDE that file from the platform's own diff (`component_version "$ROOT" ':!…'`) or the platform
+> reported `-snapshot` from its first deploy onward, forever. Helm passes the tags as `--set` values
+> instead, writing nothing to the working tree, so the diff needs no special-case and the platform
+> version is honest again — including catching a genuine hand edit that the exclusion used to hide.
 
-> **`kubectl cp` carries the local file's mode and owner into the volume.** `mktemp` makes files
-> `0600` owned by whoever ran the deploy, so the spec landed unreadable by home's user and `/version`
-> reported `null` — pointing at a missing file that was right there. `deploy.sh` now `chmod 0644`s it
-> in the writer pod and **asserts the mode** afterwards. Note a `test -r` check would NOT have caught
-> this: the writer runs as root, and root can read a `0600` file.
+> **The writer `chmod 0644`s the spec and ASSERTS the mode.** The version-writer hook renders the
+> file from Helm values, writes it, and asserts the mode is `644` before exiting — so home's
+> DIFFERENT user can read it. A `test -r` check would NOT catch a bad mode: the writer runs as root,
+> and root can read a `0600` file, so the question is whether a different user can. Because it is a
+> `--wait`/`--atomic` hook, a failed write rolls the whole deploy back rather than landing a
+> `/version` that reports `null`. (Historically this bit as a `kubectl cp` tar stream carrying a
+> local `0600` mode into the volume.)
 
 `GET /version` → `{ version, platform }` · `GET /api/versions` → `{ platform, components: {…} }`.
 `platform` is a sibling of `components`, not one of them: it has no image, no Pod and no Service.
@@ -188,7 +210,7 @@ Sharp edges, each of which has already bitten once:
 
 ## Why nginx and not Ingress annotations
 
-Routing lives in `k8s/base/nginx.conf`, and the Ingress is a dumb front door that hands it
+Routing lives in `chart/files/nginx.conf`, and the Ingress is a dumb front door that hands it
 everything. Don't "simplify" this by moving the path map into Ingress rules — the conf also splits by
 Host, makes the *public* dashboard API read-only, and rewrites the api host's `/api/…` onto the
 gateway's `/vmcp/api/…`. Those need `configuration-snippet`, disabled by default since

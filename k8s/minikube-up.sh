@@ -14,12 +14,11 @@
 #      which is why this is a script and not a one-time note.
 #
 #   2. `minikube docker-env` is unusable, for the same reason: it hands out DOCKER_HOST pointing at
-#      that same dead IP. So images are built with Colima's Docker and side-loaded with
-#      `minikube image load`.
+#      that same dead IP. So images are built with Colima's Docker and side-loaded into the node
+#      (deploy.sh does this via docker save | minikube cp | docker load).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-IMAGES=(home quiz vmcp rs-mcp-server fvt-traffic)
 
 echo "==> Colima (the Docker runtime VM)"
 if ! colima status &>/dev/null; then
@@ -57,24 +56,17 @@ echo "    enabled"
 # `minikube start`, because the registry attaches to the network minikube creates.
 ./k8s/registry.sh
 
-echo "==> Building images (Colima's Docker) and side-loading them into the cluster"
-docker build -q -t home ../project-platform/portfolio-home >/dev/null
-docker build -q -t quiz --build-arg BASE_PATH=/cloud-developer-quiz/ ../data-driven-quiz-server >/dev/null
-docker build -q -t vmcp ../open-vMCP >/dev/null
-docker build -q -t rs-mcp-server ../rs-mcp-server >/dev/null
-docker build -q -t fvt-traffic -f ../rs-mcp-server/Dockerfile.fvt ../rs-mcp-server >/dev/null
-for i in "${IMAGES[@]}"; do
-  # The platform- prefix is not cosmetic: with imagePullPolicy IfNotPresent and a bare name like
-  # `home`, a cache miss would send the kubelet to Docker Hub for docker.io/library/home — a real
-  # name that is not ours. A miss on platform-home fails loudly instead.
-  docker tag "$i:latest" "platform-$i:latest"
-  echo "    loading platform-$i"
-  minikube image load "platform-$i:latest"
-done
+# Bootstrap: the namespace, SealedSecrets and PVCs the chart references but does NOT own (see
+# k8s/bootstrap/). They must exist before deploy.sh runs helm, because the version-writer hook mounts
+# the content PVC and --wait/--atomic will roll back if it cannot.
+echo "==> Applying bootstrap (namespace, sealed secrets, PVCs, deployer RBAC)"
+kubectl apply -f k8s/bootstrap/
 
-echo "==> Applying the local stack"
-kubectl apply -k k8s/
-kubectl -n platform wait --for=condition=available --timeout=300s deploy --all
+# ONE deploy path. deploy.sh builds every component with a content-addressed tag, side-loads it, and
+# runs `helm upgrade --install`. Delegating here (instead of a second hand-rolled build+load list)
+# is what stops the two from drifting — the old list here had already lost platform-auth.
+echo "==> Deploying the stack (build + side-load + helm upgrade --install)"
+./k8s/deploy.sh
 
 cat <<'EOF'
 
@@ -84,6 +76,6 @@ cat <<'EOF'
         kubectl -n platform port-forward svc/nginx 8081:8080
         # then: http://localhost:8081/   /cloud-developer-quiz/   /vmcp/   /mcp
 
-    The public site is NOT served from here — see k8s/overlays/public/, and read its cutover note
-    before applying it.
+    The public site is NOT served from here — deploy it with `./k8s/deploy.sh public`
+    (chart/values-public.yaml), and read its cutover note before applying it.
 EOF

@@ -1,0 +1,50 @@
+# The platform's persistent volumes — BOOTSTRAP, deliberately kept out of the Helm chart.
+#
+# Why they are not in the chart: a `helm uninstall` (or a botched upgrade) must never be able to take
+# the Postgres data or the résumé/card content down with it. Leaving the PVCs here, applied once with
+# kubectl, means the chart's Deployments reference them by name and Helm never owns — and so never
+# deletes — the data. They are as long-lived as the cluster.
+#
+# The chart's postgres + app Deployments mount these by claimName (platform-content, platform-db,
+# vmcp-db). Applying the chart against a cluster where these already hold data just re-attaches.
+---
+# resume.pdf, the quiz card decks, and platform-version.json (written by the version-writer hook).
+# ReadWriteOnce is honest, not aspirational: minikube's hostPath provisioner is single-node and RWO is
+# enforced per NODE, so home and quiz both mount it concurrently. A real multi-node cluster would need
+# RWX or one volume per app.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: platform-content
+  namespace: platform
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 256Mi
+---
+# The shared Postgres server's data — two databases (auth, quiz), one owner each. See the chart's
+# postgres template for why they share a server but not a schema.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: platform-db
+  namespace: platform
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+# The vMCP gateway's own Postgres data. Kept separate from platform-db on purpose — folding it in is a
+# migration, not a freebie.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vmcp-db
+  namespace: platform
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
