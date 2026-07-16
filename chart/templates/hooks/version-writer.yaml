@@ -10,7 +10,7 @@ This is a Helm HOOK, not a normal resource, and that is the whole design the use
   * The Job renders the JSON from those values, so it can never disagree with what was deployed.
   * It fires on post-rollback too, so `helm rollback` rewrites the file to the rolled-back version —
     the images and the reported version move together.
-  * --wait/--atomic treat a failed hook as a failed release, so a version write that cannot be read
+  * --wait/--rollback-on-failure treat a failed hook as a failed release, so a version write that cannot be read
     back fails the deploy loudly, preserving deploy.sh's old "assert the mode or FATAL" property.
 
 Writing needs a pod because the volume only exists in the cluster, and it mounts the PVC read-WRITE —

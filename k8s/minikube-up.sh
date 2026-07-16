@@ -58,7 +58,7 @@ echo "    enabled"
 
 # Bootstrap: the namespace, SealedSecrets and PVCs the chart references but does NOT own (see
 # k8s/bootstrap/). They must exist before deploy.sh runs helm, because the version-writer hook mounts
-# the content PVC and --wait/--atomic will roll back if it cannot.
+# the content PVC and --wait/--rollback-on-failure will roll back if it cannot.
 echo "==> Applying bootstrap (namespace, sealed secrets, PVCs, deployer RBAC)"
 kubectl apply -f k8s/bootstrap/
 

@@ -32,7 +32,7 @@ metadata:
   namespace: platform
 rules:
   # helm upgrade server-side-applies each workload and watches the rollout. `watch` is NOT optional:
-  # `--wait` opens a WATCH, and without it the wait fails and --atomic does a FALSE rollback of a deploy
+  # `--wait` opens a WATCH, and without it the wait fails and --rollback-on-failure does a FALSE rollback of a deploy
   # that actually succeeded. create/delete because SSA may create a missing object and helm prunes.
   - apiGroups: ["apps"]
     resources: ["deployments"]
