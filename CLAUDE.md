@@ -151,7 +151,7 @@ Three things about that are deliberate:
 > file from Helm values, writes it, and asserts the mode is `644` before exiting — so home's
 > DIFFERENT user can read it. A `test -r` check would NOT catch a bad mode: the writer runs as root,
 > and root can read a `0600` file, so the question is whether a different user can. Because it is a
-> `--wait`/`--atomic` hook, a failed write rolls the whole deploy back rather than landing a
+> `--wait`/`--rollback-on-failure` hook, a failed write rolls the whole deploy back rather than landing a
 > `/version` that reports `null`. (Historically this bit as a `kubectl cp` tar stream carrying a
 > local `0600` mode into the volume.)
 
