@@ -8,7 +8,6 @@ PGDATA group-writable and Postgres refuses to start on anything but 0700. The co
 writable emptyDirs come up root-owned, so a root fix-perms init chowns them to 999 first.
 */ -}}
 {{- range $name, $db := .Values.databases }}
-{{- if kindIs "map" $db }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -32,7 +31,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       initContainers:
         - name: fix-perms
-          image: {{ $.Values.databases.image }}
+          image: postgres:16
           securityContext:
             runAsUser: 0
             allowPrivilegeEscalation: false
@@ -47,7 +46,7 @@ spec:
             limits: { memory: 32Mi }
       containers:
         - name: postgres
-          image: {{ $.Values.databases.image }}
+          image: postgres:16
           ports: [{ containerPort: 5432 }]
           securityContext:
             allowPrivilegeEscalation: false
@@ -96,6 +95,5 @@ metadata:
 data:
   init.sql: |
 {{ $db.initSql | indent 4 }}
-{{- end }}
 {{- end }}
 {{- end }}
