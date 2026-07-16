@@ -80,15 +80,11 @@ spec:
             - { name: tmp, mountPath: /tmp }
           {{- with $app.probe }}
           readinessProbe:
-            httpGet: { path: {{ .path }}, port: {{ $app.port }} }
-            initialDelaySeconds: {{ .initialDelaySeconds }}
-            periodSeconds: {{ .periodSeconds | default 10 }}
+            {{- include "platform.httpProbe" (dict "probe" . "port" $app.port) | nindent 12 }}
           {{- end }}
           {{- with $app.livenessProbe }}
           livenessProbe:
-            httpGet: { path: {{ .path }}, port: {{ $app.port }} }
-            initialDelaySeconds: {{ .initialDelaySeconds }}
-            periodSeconds: {{ .periodSeconds | default 10 }}
+            {{- include "platform.httpProbe" (dict "probe" . "port" $app.port) | nindent 12 }}
           {{- end }}
           resources:
             {{- toYaml $app.resources | nindent 12 }}
