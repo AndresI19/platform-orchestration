@@ -1,0 +1,63 @@
+# Deploy values for quiz — extracted verbatim from the umbrella chart's apps.quiz block,
+# plus the `name` field the service chart needs. In stage 2 this moves to quiz's own repo as
+# deploy/values.yaml.
+name: quiz
+image:
+  repo: platform-quiz
+  tag: latest
+version: 0.0.0
+port: 80
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+probe:
+  path: /cloud-developer-quiz/api/health
+  initialDelaySeconds: 3
+env:
+  - name: PORT
+    value: '80'
+  - name: BASE_PATH
+    value: /cloud-developer-quiz/
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: quiz-db
+        key: DATABASE_URL
+  - name: AUTH_JWKS_URI
+    valueFrom:
+      configMapKeyRef:
+        name: platform-config
+        key: AUTH_JWKS_URI
+  - name: AUTH_ISSUER
+    valueFrom:
+      configMapKeyRef:
+        name: platform-config
+        key: AUTH_ISSUER
+  - name: AUTH_AUDIENCE
+    value: platform
+initContainers:
+  - name: seed-cards
+    command:
+      - sh
+      - '-c'
+      - 'mkdir -p /content/cards && cp -rn /app/cards/. /content/cards/ && echo "cards on volume: $(ls /content/cards | wc -l)"'
+    volumeMounts:
+      - name: content
+        mountPath: /content
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+volumeMounts:
+  - name: content
+    mountPath: /app/cards
+    subPath: cards
+volumes:
+  - name: content
+    persistentVolumeClaim:
+      claimName: platform-content

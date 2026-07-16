@@ -1,3 +1,7 @@
 *.log
 .DS_Store
 .env
+
+# Vendored library subcharts (rebuilt by `helm dependency build`)
+charts/*/charts/
+charts/*/Chart.lock

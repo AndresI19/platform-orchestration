@@ -1,0 +1,15 @@
+apiVersion: v2
+name: platform-infra
+description: The shared platform infrastructure — nginx router, the two Postgres servers, the cloudflared tunnel, platform-config, the ingress, and the version-writer hook. One release; each service deploys as its own release alongside this.
+type: application
+
+# The chart's own version. The PLATFORM's version (what home reports at /version) is not this — it is
+# resolved from git at deploy time and passed in as `platform.version`, then written to the content
+# volume by the version-writer hook. See k8s/deploy.sh and templates/hooks/version-writer.yaml.
+version: 0.1.0
+appVersion: "0.0.0"
+
+dependencies:
+  - name: platform-lib
+    version: 0.1.0
+    repository: file://../lib

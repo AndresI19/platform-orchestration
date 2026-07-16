@@ -1,0 +1,20 @@
+# Defaults for the generic service chart. Every real value comes from the service's own
+# deploy/values.yaml (passed with -f) and the per-deploy --set of image.repo/image.tag/version.
+# What is set here is only the schema's shape + the safe defaults the helper already applies.
+
+# The release/object name — MUST be overridden by the service's values (it is the Deployment,
+# Service, and label name, and must match the Service DNS the router and siblings expect).
+name: ""
+
+# Overridden per deploy by CI (--set image.repo=registry:5000/<name> --set image.tag=<version>).
+image:
+  repo: ""
+  tag: latest
+
+# Vestigial: consumed only by the old version-writer's components map, which is gone. Kept so the
+# deploy's --set version=<v> has a home and is visible in `helm get values`. Not rendered.
+version: "0.0.0"
+
+# Empty defaults for the optional per-service fields the helper splices in `with` guards, so a
+# minimal service (no env/initContainers/volumes) renders cleanly.
+resources: {}
