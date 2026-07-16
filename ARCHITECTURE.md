@@ -46,11 +46,11 @@ namespace, one Cloudflare tunnel. This is a description of what exists, not a pl
 ║                                        MCP (SSE)  │        │ PVC: vmcp-db             ║
 ║                                   ┌───────────────┘        └──────────────            ║
 ║                                   │                                                   ║
-║                        ┌──────────▼──────────┐        ┌──────────────────┐            ║
-║                        │ rs-mcp-server :8000 │ ◄──────│  fvt-traffic     │            ║
-║                        │ 17 RuneScape tools  │  via   │  (replays the    │            ║
-║                        └──────────┬──────────┘  vmcp  │   FVT suite)     │            ║
-║                                   │                   └──────────────────┘            ║
+║                        ┌──────────▼──────────┐                                        ║
+║                        │ rs-mcp-server :8000 │   ◄─ FVT suite, replayed from the HOST  ║
+║                        │ 17 RuneScape tools  │      via the public API (see note ▽)    ║
+║                        └──────────┬──────────┘                                        ║
+║                                   │                                                   ║
 ╚═══════════════════════════════════╪═══════════════════════════════════════════════════╝
                                     │ outbound HTTPS
               ┌─────────────────────┼──────────────────────┬──────────────────┐
@@ -59,6 +59,15 @@ namespace, one Cloudflare tunnel. This is a description of what exists, not a pl
      oldschool.…wiki     (OSRS GE prices)        (hiscores)             (2nd MCP upstream,
      (MediaWiki API)                                                     reached from vmcp)
 ```
+
+> ▽ **The FVT traffic runner is no longer in the cluster.** It used to be a `fvt-traffic` Deployment
+> that dialled `vmcp` over cluster DNS. It now runs on the **host** (a compose service under
+> platform-cicd) and reaches the gateway through the **public** API — `https://api-andres.project-platform.me`,
+> in the front door with every other visitor. Two things forced the move: vMCP now *verifies* JWTs, so
+> the runner has to sign in to `platform-auth` for a real token like any client (an in-cluster forgery
+> was silently rejected); and exercising the same public path a real user takes is a better smoke test
+> than an internal shortcut. It authenticates as the `fvt-runner` account and its `FVT_CODE` lives in
+> the host's `.env`, not a cluster Secret.
 
 ---
 
@@ -98,7 +107,7 @@ publicly it is the API host. No rebuild between the two.
 | `vmcp` | `rs-mcp-server:8000/sse` | **MCP over SSE** | Registered upstream. Seeded by `SEED_URL_RS_MCP`. |
 | `vmcp` | `mcp.deepwiki.com/mcp` | **MCP over Streamable HTTP** | Second upstream, external. |
 | `vmcp` | `vmcp-db:5432` | Postgres | Registry, users, and the `tool_calls` telemetry table. |
-| `fvt-traffic` | `vmcp:8001/mcp/rs-mcp` | **MCP over Streamable HTTP** | Replays the FVT suite *through* the gateway. |
+| `fvt-traffic` *(host, not in-cluster)* | public API → `vmcp:8001/mcp/rs-mcp` | **MCP over Streamable HTTP** | Replays the FVT suite *through* the gateway, entering by the public front door. |
 | `rs-mcp-server` | RuneScape wiki / GE / hiscores | HTTPS | Live game data. In-process LRU+TTL cache in front. |
 | `home` | Discord webhook | HTTPS | The optional "who are you?" greeting. Unset → logs to stdout. |
 
@@ -181,7 +190,7 @@ Nothing is published to the host. Local access is `kubectl port-forward svc/ngin
   commit. The controller decrypts them into real `Secret` objects at apply time. Managed via
   `./k8s/secrets.sh`. They are strict-scoped: bound cryptographically to namespace **and** name.
 - **Config is a plain ConfigMap** (`platform-config`), set to public values by `values-public.yaml`.
-  `VMCP_API_BASE`, `CORS_ORIGINS`, `HOME_URL`, `FVT_INTERVAL_SECONDS`.
+  `VMCP_API_BASE`, `CORS_ORIGINS`, `HOME_URL`.
 
 Because those reach the pods as **environment variables**, changing the ConfigMap does *not* restart
 the pods that read them — `rollout restart` is required. (The nginx conf is different: the chart hashes
@@ -214,8 +223,10 @@ security posture of each component is tracked in that component's own repo, not 
 - **Authorisation is a routing-layer control, not an application one.** The public surfaces are
   constrained by nginx rather than by the apps themselves. That works, but it means the routing
   config is load-bearing for more than routing — treat changes to it as security changes.
-- **`fvt-traffic` is a Deployment, not a CronJob**, because its entrypoint is a `while true` loop
-  that never exits. The clean fix is an `FVT_ONCE` flag in `rs-mcp-server`'s repo.
+- **`fvt-traffic` runs on the host, not in the cluster.** Its entrypoint is a `while true` loop that
+  never exits, so it was never a good CronJob; it now lives as a compose service under platform-cicd,
+  hitting the public API from outside — which also means it signs in to `platform-auth` for a real
+  verified token instead of the in-cluster forgery vMCP now rejects.
 - **vMCP is single-replica** (in-process session map) and its aggregate `tools/list` opens a fresh
   connection to *every* upstream on each request, while the dashboard polls every 5s.
 - **Sealed-secrets' private key is the only thing** that can decrypt the committed `sealed-*.yaml`

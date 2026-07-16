@@ -1,9 +1,10 @@
 # Kubernetes (minikube)
 
-**This is how the platform runs.** All eight workloads, every route, the vhost split, the read-only
-public API, the MCP endpoint, the FVT traffic runner, and the cloudflared tunnel — verified serving
-project-platform.me from this cluster. The docker-compose stack it was ported from has been deleted;
-there is one way to run the platform now.
+**This is how the platform runs.** Every in-cluster workload, every route, the vhost split, the
+read-only public API, the MCP endpoint, and the cloudflared tunnel — verified serving
+project-platform.me from this cluster. (The FVT traffic runner used to live here too; it now runs on
+the host and hits the public API from outside — see platform-cicd.) The docker-compose stack it was
+ported from has been deleted; there is one way to run the platform now.
 
 ## Layout
 
@@ -218,7 +219,7 @@ kubectl -n platform rollout restart deploy/home deploy/vmcp   # ConfigMap env is
   plain http internally — fine behind the tunnel, not fine if anything else is ever pointed at it.
 - **Resource requests/limits are guesses**, set to keep the stack schedulable on a 4 CPU / 8 GiB
   node, not measured against real load.
-- **`fvt-traffic` is a Deployment, not a CronJob.** Its image entrypoint is a `while true` loop that
-  mints its own bearer token and pins the gateway route, so it never exits — a CronJob Pod would hang
-  forever. Doing it properly wants a small `FVT_ONCE` flag in rs-mcp-server's own repo, after which
-  this becomes a CronJob on `0 */4 * * *` and `FVT_INTERVAL_SECONDS` goes away.
+- **`fvt-traffic` no longer runs in the cluster** — it moved to the host (a compose service under
+  platform-cicd) and now reaches the gateway through the public API. Its `while true` entrypoint never
+  exited, so it was a poor fit for a CronJob Pod anyway; and because vMCP verifies JWTs now, it signs
+  in to `platform-auth` for a real token rather than minting the forged bearer it used to.
