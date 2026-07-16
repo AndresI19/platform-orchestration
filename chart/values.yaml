@@ -22,7 +22,6 @@ config:
   MCP_PUBLIC_URL: ""
   AUTH_ISSUER: "https://api-andres.project-platform.me/auth"
   AUTH_JWKS_URI: "http://platform-auth:8002/.well-known/jwks.json"
-  FVT_INTERVAL_SECONDS: "14400"
 
 # The public front door. OFF locally; values-public.yaml flips it on. This is a CUTOVER, not an
 # addition — Cloudflare load-balances across every connector on a tunnel, so two split live traffic.
@@ -201,24 +200,3 @@ apps:
         resources:
           requests: { cpu: 10m, memory: 32Mi }
           limits: { memory: 128Mi }
-
-  fvt-traffic:
-    image: { repo: platform-fvt-traffic, tag: latest }
-    version: "0.0.0"
-    # No port, no Service — an outbound runner nothing dials into. Recreate so two runs never overlap
-    # during a rollout (each makes ~54 live calls against someone else's API).
-    service: false
-    strategy: Recreate
-    resources:
-      requests: { cpu: 25m, memory: 128Mi }
-      limits: { memory: 512Mi }
-    env:
-      - { name: PYTHONDONTWRITEBYTECODE, value: "1" }
-      - { name: VMCP_URL, value: "http://vmcp:8001" }
-      - name: FVT_INTERVAL_SECONDS
-        valueFrom:
-          configMapKeyRef: { name: platform-config, key: FVT_INTERVAL_SECONDS }
-      - { name: AUTH_URL, value: "http://platform-auth:8002" }
-      - name: FVT_CODE
-        valueFrom:
-          secretKeyRef: { name: fvt-auth, key: FVT_CODE }

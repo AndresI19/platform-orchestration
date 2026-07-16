@@ -51,13 +51,12 @@ if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx minikube; then
 fi
 
 # app name -> source repo (relative to this repo)
-APPS=(home quiz vmcp rs-mcp-server fvt-traffic platform-auth)
+APPS=(home quiz vmcp rs-mcp-server platform-auth)
 declare -A REPO=(
   [home]=../project-platform/portfolio-home
   [quiz]=../data-driven-quiz-server
   [vmcp]=../open-vMCP
   [rs-mcp-server]=../rs-mcp-server
-  [fvt-traffic]=../rs-mcp-server
   [platform-auth]=../project-platform/platform-auth
 )
 
@@ -70,9 +69,9 @@ declare -A REPO=(
 # "Differs from main" means uncommitted edits, untracked files, OR commits not yet on main — anything
 # that makes the built image something other than what main describes.
 #
-# The diff is SCOPED TO THE COMPONENT'S SUBTREE, deliberately. Two components share one repo in two
-# places (home + platform-auth in project-platform; rs-mcp-server + fvt-traffic in rs-mcp-server), so
-# a repo-wide diff would stamp platform-auth as a snapshot merely because the home page was edited.
+# The diff is SCOPED TO THE COMPONENT'S SUBTREE, deliberately. Two components share one repo —
+# home + platform-auth both live in project-platform — so a repo-wide diff would stamp platform-auth
+# as a snapshot merely because the home page was edited.
 # The tag, by contrast, IS repo-wide — that is what a git tag is.
 #
 # Extra arguments are git pathspecs appended to the diff — in practice, exclusions.
@@ -150,7 +149,6 @@ for app in "${APPS[@]}"; do
         --build-arg "BUILD_DATE=${BUILD_DATE}")
   case "$app" in
     quiz) docker build -q -t "$img" "${args[@]}" --build-arg BASE_PATH=/cloud-developer-quiz/ "$repo" >/dev/null ;;
-    fvt-traffic) docker build -q -t "$img" "${args[@]}" -f "$repo/Dockerfile.fvt" "$repo" >/dev/null ;;
     *) docker build -q -t "$img" "${args[@]}" "$repo" >/dev/null ;;
   esac
   echo "    $img"

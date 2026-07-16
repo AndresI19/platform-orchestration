@@ -112,9 +112,9 @@ systemd/                      colima.service, platform.service, platform-boot.sh
 
 "Differs" means uncommitted edits, untracked files, *or* commits not yet on `main` — anything that
 makes the image something other than what `main` describes. The diff is **scoped to the component's
-subtree**, because two components share a repo in two places (`home` + `platform-auth`; `rs-mcp-server`
-+ `fvt-traffic`) and editing one must not stamp the other as a snapshot. The tag is repo-wide, because
-that is what a git tag is.
+subtree**, because two components share a repo (`home` + `platform-auth`, both in project-platform) and
+editing one must not stamp the other as a snapshot. The tag is repo-wide, because that is what a git
+tag is.
 
 The version reaches the running app as a **file baked into the image** (`ARG VERSION` → `VERSION`),
 which the app reads at startup and serves from `/version`. It is also an OCI label, so an image can be
