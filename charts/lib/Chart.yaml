@@ -1,0 +1,5 @@
+apiVersion: v2
+name: platform-lib
+description: Shared Helm helpers for the platform — the platform.app Deployment/Service renderer and platform.httpProbe. Consumed as a library dependency by platform-infra and the per-service chart, so the rendering logic lives once.
+type: library
+version: 0.1.0

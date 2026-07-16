@@ -1,0 +1,15 @@
+# The PUBLIC overlay — layer with `-f values.yaml -f values-public.yaml`. It only flips runtime config
+# and adds the cloudflared connector; the IMAGES are identical to local, on purpose (one image serves
+# both, config decides the hostnames). This is the compose `--profile public` equivalent.
+#
+# READ BEFORE APPLYING: cloudflared is a CUTOVER. Cloudflare treats every connector on a tunnel as an
+# HA replica and splits live traffic across them, so stop any other connector for this tunnel FIRST.
+cloudflared:
+  enabled: true
+
+# The front end and API now live on different hosts, so the browser needs the real origins (empty =
+# same-origin only works when everything is one host behind nginx).
+config:
+  VMCP_API_BASE: "https://api-andres.project-platform.me"
+  CORS_ORIGINS: "https://andres.project-platform.me"
+  MCP_PUBLIC_URL: "https://api-andres.project-platform.me/mcp"

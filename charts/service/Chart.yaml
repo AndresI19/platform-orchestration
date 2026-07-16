@@ -1,0 +1,11 @@
+apiVersion: v2
+name: service
+description: The generic per-service chart — renders one platform workload (a Deployment and, unless service:false, a Service) via the shared platform.app helper from platform-lib. Fed a single service's deploy/values.yaml; every service deploys as its own release with this same chart.
+type: application
+version: 0.1.0
+appVersion: "0.0.0"
+
+dependencies:
+  - name: platform-lib
+    version: 0.1.0
+    repository: file://../lib

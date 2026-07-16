@@ -1,0 +1,50 @@
+# Default (LOCAL) values for the platform-infra chart — the shared infrastructure the services sit
+# behind: the router, the databases, the tunnel, platform-config, and the version spec. The five app
+# workloads are NOT here any more — each is its own release with its own deploy/values.yaml.
+#
+# What is NOT here, on purpose: the namespace, the deployer RBAC, the SealedSecrets, and the three
+# PVCs. Those are bootstrap (k8s/bootstrap/, applied with kubectl) so Helm never manages secrets or
+# risks the Postgres data, and the SealedSecrets keep working un-re-sealed (crypto-bound to
+# namespace + name, both unchanged).
+
+# The orchestration repo's own version. It ships no image, so its version rides on the content volume
+# instead — set here at deploy from git, then written to platform-version.json by the version-writer
+# hook and served by home at /version. 0.0.0 is only the un-deployed default.
+platform:
+  version: "0.0.0"
+
+# The platform-config ConfigMap. LOCAL defaults = same-origin (empty). The apps read these as env at
+# startup, so a change needs a rollout restart — except nginx, whose conf rolls on a checksum.
+config:
+  VMCP_API_BASE: ""
+  CORS_ORIGINS: ""
+  HOME_URL: "/"
+  MCP_PUBLIC_URL: ""
+  AUTH_ISSUER: "https://api-andres.project-platform.me/auth"
+  AUTH_JWKS_URI: "http://platform-auth:8002/.well-known/jwks.json"
+
+# The public front door. OFF locally; values-public.yaml flips it on. This is a CUTOVER, not an
+# addition — Cloudflare load-balances across every connector on a tunnel, so two split live traffic.
+cloudflared:
+  enabled: false
+  image: cloudflare/cloudflared:latest
+
+# The router. Its conf lives in files/nginx.conf; a checksum/config pod annotation rolls the
+# Deployment when the conf changes (Helm has no configMapGenerator).
+nginx:
+  image: nginx:1.27-alpine
+
+# The two Postgres servers. PVCs are bootstrap (not the chart); these own the Deployment + Service,
+# and platform-db additionally seeds two databases via init.sql on an empty volume.
+databases:
+  platform-db:
+    pvcName: platform-db
+    secretName: platform-db
+    probe: ["pg_isready", "-U", "platform"]
+    initSql: |
+      CREATE DATABASE auth;
+      CREATE DATABASE quiz;
+  vmcp-db:
+    pvcName: vmcp-db
+    secretName: vmcp-db
+    probe: ["pg_isready", "-U", "vmcp", "-d", "vmcp"]

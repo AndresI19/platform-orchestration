@@ -1,0 +1,99 @@
+{{- /*
+The Postgres servers. Their PVCs are bootstrap (k8s/bootstrap/pvcs.yaml) so Helm never risks the
+data — these own the Deployment + Service, and platform-db additionally seeds its two databases via
+an init.sql ConfigMap that Postgres runs ONCE on an empty volume.
+
+Both run as uid 999 (the image's postgres user) with NO fsGroup — fsGroup would recursively make
+PGDATA group-writable and Postgres refuses to start on anything but 0700. The cost is that the
+writable emptyDirs come up root-owned, so a root fix-perms init chowns them to 999 first.
+*/ -}}
+{{- range $name, $db := .Values.databases }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $name }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate } # a single Postgres owns the volume
+  selector:
+    matchLabels: { app: {{ $name }} }
+  template:
+    metadata:
+      labels: { app: {{ $name }} }
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        - name: fix-perms
+          image: postgres:16
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"], add: ["CHOWN"] }
+          command: ["sh", "-c", "chown 999:999 /var/run/postgresql /tmp"]
+          volumeMounts:
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports: [{ containerPort: 5432 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          envFrom:
+            - secretRef: { name: {{ $db.secretName }} }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            {{- if $db.initSql }}
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+            {{- end }}
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe:
+            exec: { command: {{ $db.probe | toJson }} }
+            initialDelaySeconds: 5
+          resources:
+            requests: { cpu: 25m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: {{ $db.pvcName }} }
+        {{- if $db.initSql }}
+        - name: init
+          configMap: { name: {{ $name }}-init }
+        {{- end }}
+        - { name: run, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  selector: { app: {{ $name }} }
+  ports: [{ port: 5432, targetPort: 5432 }]
+{{- if $db.initSql }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-init
+  namespace: {{ $.Release.Namespace }}
+data:
+  init.sql: |
+{{ $db.initSql | indent 4 }}
+{{- end }}
+{{- end }}
