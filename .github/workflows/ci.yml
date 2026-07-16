@@ -5,44 +5,73 @@ on:
   push:
     branches: [main]
 
-# This repo ships manifests, not an image, so the security gate is a Trivy CONFIG scan of the
-# Kubernetes YAML (misconfigurations: missing securityContext, no resource limits, root filesystems,
-# and so on) rather than an image scan.
+# This repo ships MANIFESTS, not an image, so the security gate is a Trivy CONFIG scan of the
+# Kubernetes YAML (misconfigurations: missing securityContext, no resource limits, writable root
+# filesystems, and so on) rather than an image scan.
 #
-# It is a BLOCKING gate (exit-code 1) at HIGH,CRITICAL. Every workload was hardened in the 2026-07-13
-# pass — pod- and container-level securityContext, readOnlyRootFilesystem with writable emptyDir
-# mounts for the paths that genuinely need them — so the scan is clean, and any new manifest that
-# regresses below that bar fails its PR here instead of reaching the cluster.
+# The platform runs on HELM now, not kustomize, and both jobs reflect that: the workloads live in the
+# chart, so both the schema-validation and the security scan render the chart with `helm template`
+# and check the OUTPUT. Rendering the two value sets — local defaults and the public overlay — covers
+# both the local and the live topology. k8s/ no longer holds workloads; it is bootstrap only
+# (namespace, PVCs, sealed secrets, the deployer RBAC), and is scanned separately.
+#
+# config-scan is a BLOCKING gate (exit-code 1) at HIGH,CRITICAL. Every workload is hardened — pod- and
+# container-level securityContext, readOnlyRootFilesystem with writable mounts only where a path needs
+# one — so the scan is clean, and any manifest that regresses below that bar fails its PR here instead
+# of reaching the cluster.
 jobs:
   config-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Trivy config scan (k8s manifests)
+      - name: Install helm
+        run: |
+          curl -sSL "https://get.helm.sh/helm-v4.2.3-linux-amd64.tar.gz" | tar xz
+          sudo mv linux-amd64/helm /usr/local/bin/
+      - name: Render the chart (local + public)
+        run: |
+          set -euo pipefail
+          mkdir -p rendered
+          helm template platform chart                             > rendered/local.yaml
+          helm template platform chart -f chart/values-public.yaml > rendered/public.yaml
+      # The workloads — the actual thing the gate protects. Hardened, so this is clean; a regression
+      # (a Pod with no securityContext, a container without resource limits) fails the PR here.
+      - name: Trivy config scan (rendered workloads)
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: rendered
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      # The bootstrap manifests (namespace, PVCs, sealed secrets, deployer RBAC) — scanned too, so a
+      # regression here is caught. The deployer Role's two intentional grants are ignored with a
+      # documented rationale in .trivyignore.
+      - name: Trivy config scan (bootstrap)
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           scan-type: config
           scan-ref: k8s
           severity: HIGH,CRITICAL
-          exit-code: "1" # blocking — the manifests are hardened; a regression should fail the PR
+          exit-code: "1"
+          trivyignores: .trivyignore
 
   manifests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Render every overlay and schema-validate it — the "lint" for a Kustomize platform. kustomize
-      # build catches a broken/unresolvable overlay; kubeconform -strict catches an invalid manifest
-      # (a typo'd apiVersion, a misindented field) before it ever reaches the cluster. SealedSecret is
-      # a CRD with no public schema, so -ignore-missing-schemas skips it rather than erroring.
-      - name: Install kustomize + kubeconform
+      # Render the chart and schema-validate it — the "lint" for a Helm platform. helm template catches
+      # a broken/unrenderable template; kubeconform -strict catches an invalid manifest (a typo'd
+      # apiVersion, a misindented field) before it reaches the cluster. SealedSecret is a CRD with no
+      # public schema, so -ignore-missing-schemas skips it rather than erroring.
+      - name: Install helm + kubeconform
         run: |
-          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" | tar xz
+          curl -sSL "https://get.helm.sh/helm-v4.2.3-linux-amd64.tar.gz" | tar xz
           curl -sSL "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz" | tar xz kubeconform
-          sudo mv kustomize kubeconform /usr/local/bin/
-      - name: Render + schema-validate every overlay
+          sudo mv linux-amd64/helm kubeconform /usr/local/bin/
+      - name: Render + schema-validate (local + public)
         run: |
           set -euo pipefail
-          for overlay in k8s k8s/overlays/public; do
-            echo "== $overlay =="
-            kustomize build "$overlay" | kubeconform -strict -ignore-missing-schemas -summary -
+          for values in "" "-f chart/values-public.yaml"; do
+            echo "== helm template ${values:-(defaults)} =="
+            helm template platform chart $values | kubeconform -strict -ignore-missing-schemas -summary -
           done

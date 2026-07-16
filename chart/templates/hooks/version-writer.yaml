@@ -42,14 +42,30 @@ spec:
     spec:
       restartPolicy: Never
       terminationGracePeriodSeconds: 0
+      # Same non-root identity home and quiz use to write this very PVC (uid/gid 1000, fsGroup 1000) —
+      # the content volume is owned 1000:1000, so the writer needs no root to write to it. Hardened to
+      # match every other workload in the chart: non-root, read-only root filesystem (it only writes to
+      # the mounted /content, never its own rootfs), no privilege escalation, all capabilities dropped.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: writer
           image: busybox:1.36
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           # The spec is rendered by Helm from values (single-line toJson — our versions/images never
           # contain a single quote, so single-quoting is safe). 0644 because everything on this volume
-          # is public content and home mounts it read-only; the mode is ASSERTED, not `test -r`,
-          # because this writer runs as root and root can read a 0600 file — the question is whether
-          # home's DIFFERENT user can, which is a question about the mode.
+          # is public content and home mounts it read-only; the mode is ASSERTED, not `test -r`, so a
+          # regression that leaves the file unreadable by home fails the deploy loudly rather than
+          # serving a /version of null.
           command:
             - sh
             - -c
