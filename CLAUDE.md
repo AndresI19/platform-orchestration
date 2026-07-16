@@ -154,11 +154,20 @@ Three things about that are deliberate:
 - **Per request, not at startup.** A deploy rewrites the file. Read once at boot, home would report
   whatever platform version it happened to start with, and need a pointless rollout to tell the truth.
   Rewriting the spec updates the site with **no rollout at all** — a spec-only deploy takes ~10s.
-- **home mounts `/content` read-only**, and the write happens through a separate pod — the
-  version-writer Helm hook (`post-install,post-upgrade,post-rollback`), which mounts the PVC
-  read-write. A public web server has no business rewriting the record of what is deployed.
+- **The write happens through a separate pod** — the version-writer Helm hook
+  (`post-install,post-upgrade,post-rollback`), which mounts the PVC read-write and renders the spec
+  from Helm values, so it can never disagree with what was deployed.
+- **home mounts `/content` read-WRITE now, and this file's protection is no longer the mount.** It
+  used to be: home held the volume read-only and simply could not rewrite the record of what is
+  deployed. home now writes that volume, for its admin résumé-upload route. Nothing in the filesystem
+  stops it reaching this file either — the volume is owned 1000:1000, home runs as uid 1000, and POSIX
+  takes rename permission from the *directory's* write bit, not the target file's owner. What keeps
+  the spec the deploy's alone is home's allowlist (`resume.pdf`, `cards/<name>.yaml`), which excludes
+  it deliberately and is tested against this exact path.
 - **The `/content` mount is a directory, not a `subPath`.** A `subPath` is resolved once at mount
-  time, so the container would keep reading the inode it started with and never see a redeploy.
+  time, so the container would keep reading the inode it started with and never see a redeploy. This
+  was written for the version spec and it was right; the résumé sat behind a `subPath` mount anyway
+  and had precisely this bug — a swap needed a rollout — until it moved to the directory mount too.
 
 > **A deploy no longer dirties this repo — the old `-snapshot`-forever hole is CLOSED by the Helm
 > migration.** deploy.sh used to write image pins into a tracked `kustomization.yaml`, so it had to
