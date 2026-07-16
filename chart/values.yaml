@@ -37,6 +37,7 @@ nginx:
 # The two Postgres servers. PVCs are bootstrap (not the chart); these own the Deployment + Service,
 # and platform-db additionally seeds two databases via init.sql on an empty volume.
 databases:
+  image: &pg postgres:16
   platform-db:
     pvcName: platform-db
     secretName: platform-db
@@ -149,7 +150,7 @@ apps:
           configMapKeyRef: { name: platform-config, key: MCP_PUBLIC_URL }
     initContainers:
       - name: wait-for-db
-        image: postgres:16
+        image: *pg
         command: ["sh", "-c", "until pg_isready -h vmcp-db -U vmcp -d vmcp; do echo waiting for db; sleep 2; done"]
         resources:
           requests: { cpu: 10m, memory: 32Mi }
@@ -195,7 +196,7 @@ apps:
           secretKeyRef: { name: platform-auth, key: AUTH_ADMINS }
     initContainers:
       - name: wait-for-db
-        image: postgres:16
+        image: *pg
         command: ["sh", "-c", "until pg_isready -h platform-db -U platform; do echo waiting for db; sleep 2; done"]
         resources:
           requests: { cpu: 10m, memory: 32Mi }
