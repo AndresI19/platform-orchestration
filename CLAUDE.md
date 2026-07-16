@@ -4,9 +4,19 @@ Guidance for Claude Code when working in this repo.
 
 ## What this is
 
-The orchestration for the personal platform. It is **the only place the platform's topology is
-described**: manifests, routing, secrets, and boot. Read `ARCHITECTURE.md` first — it has the full
-stack, who talks to whom, and every port.
+The orchestration for the personal platform: manifests, routing, secrets, and boot. Read
+`ARCHITECTURE.md` first — it has the full stack, who talks to whom, and every port.
+
+**It is no longer the only place the topology is described, and that is the point.** This repo owns
+the platform's SHARED shape — the router, the databases, the tunnel, the config, and the generic
+`charts/service` chart every service is rendered from. Each service's own Deployment/Service spec
+lives in the repo that ships it, as `deploy/<name>.values.yaml`. The team that changes a service
+changes its resources; orchestration decides what a service *is*.
+
+So: six Helm releases, not one. `platform-infra` plus `home`, `quiz`, `vmcp`, `rs-mcp-server`,
+`platform-auth`. Both deploy paths — `./k8s/deploy.sh` here and platform-cicd's CI — render the SAME
+charts from the SAME values files, and differ only in where the image comes from (CI pulls
+`registry:5000/<name>:<version>`; this repo side-loads `platform-<name>:<tag>`).
 
 **There is no docker-compose.** It was deleted after the cutover; the platform runs on Kubernetes
 (minikube), and the public site (`project-platform.me`) is served from this cluster right now.
@@ -20,17 +30,24 @@ kubectl apply -f k8s/bootstrap/                   # namespace, sealed secrets, P
 ./k8s/deploy.sh public                            # + the public cloudflared front door (values-public.yaml)
 kubectl -n platform port-forward svc/nginx 8081:8080   # local access — see below
 
-helm history platform                             # release revisions
-helm rollback platform <n>                        # revert to a revision — images AND reported version move together
-helm template platform chart                      # render without applying
+helm list -n platform                             # the six releases
+helm history <release> -n platform                # revisions of one release (platform-infra, quiz, …)
+helm rollback <release> <n> -n platform           # revert one component — images AND, for platform-infra, the reported version
+./scripts/render-all.sh /tmp/out                  # render every release without applying
 ./k8s/secrets.sh seal|show|recover|list           # secrets; run with no args for usage
 ```
 
 ## Pre-PR checks
 
 ```bash
-helm lint chart
+./scripts/render-all.sh /tmp/out                  # exactly what CI renders + scans. The real check.
+helm lint charts/platform-infra
+helm lint charts/service -f ../data-driven-quiz-server/deploy/quiz.values.yaml
 ```
+
+`charts/service` must be linted **with a service's values**. On its own it renders `name: ""` and
+warns about an invalid `metadata.name` — that is the generic chart working as designed (it carries no
+per-service values at all), not a defect to fix.
 
 ## Three things that will waste your time if you don't know them
 
@@ -61,7 +78,7 @@ sits through the full `apiserver healthz never reported healthy` timeout before 
 as *environment variables*, which are read once at container start. After changing it:
 `kubectl -n platform rollout restart deploy/home deploy/vmcp`.
 
-The nginx conf is the exception — the chart hashes `chart/files/nginx.conf` into a `checksum/config`
+The nginx conf is the exception — the chart hashes `charts/platform-infra/files/nginx.conf` into a `checksum/config`
 annotation on the pod template, so editing the conf changes the Pod spec and rolls the Deployment
 automatically. (This replaces kustomize's `configMapGenerator` hashed name — Helm has no generator.)
 Don't remove the annotation.
@@ -76,22 +93,25 @@ re-sealing every one: `./k8s/secrets.sh seal <name> -n <ns> -o <file> KEY=@ENV_V
 ## Layout
 
 ```
-chart/                        the Helm chart — the platform's topology, ONE release named `platform`
-├── Chart.yaml
-├── values.yaml               local defaults; image tags + versions come from deploy.sh --set
-├── values-public.yaml        + cloudflared and the real hostnames. THIS SERVES THE LIVE SITE.
-├── files/nginx.conf          ← THE ROUTING TABLE. Path map + Host split. Read this first.
-└── templates/
-    ├── _app.tpl              generic Deployment(+Service) renderer for the six apps
-    ├── apps.yaml             ranges over .Values.apps
-    ├── postgres.yaml         platform-db + vmcp-db
-    ├── nginx.yaml            the router + its ConfigMap (checksum-rolled)
-    ├── cloudflared.yaml      gated on .Values.cloudflared.enabled
-    ├── config.yaml · ingress.yaml
-    └── hooks/version-writer.yaml   writes platform-version.json onto the content PVC
+charts/
+├── platform-infra/           release 1 of 6 — everything the services sit BEHIND
+│   ├── values.yaml           local defaults; platform.version comes from deploy.sh --set
+│   ├── values-public.yaml    + cloudflared and the real hostnames. THIS SERVES THE LIVE SITE.
+│   ├── files/nginx.conf      ← THE ROUTING TABLE. Path map + Host split. Read this first.
+│   └── templates/
+│       ├── postgres.yaml     platform-db + vmcp-db
+│       ├── nginx.yaml        the router + its ConfigMap (checksum-rolled)
+│       ├── cloudflared.yaml  gated on .Values.cloudflared.enabled
+│       ├── config.yaml · ingress.yaml
+│       └── hooks/version-writer.yaml   writes platform-version.json onto the content PVC
+├── service/                  releases 2–6 — the GENERIC service chart. Carries no per-service values:
+│                             every service is this chart + its own repo's deploy/<name>.values.yaml.
+└── lib/                      the shared platform.app helper both charts render through. Vendored into
+                              each chart by `helm dependency build`, never committed (.gitignore).
+scripts/render-all.sh         render all six releases without applying. Used by both CI jobs.
 k8s/
 ├── minikube-up.sh            cold-boot bring-up (delegates to deploy.sh)
-├── deploy.sh                 build → side-load → helm upgrade --install. THE only supported deploy.
+├── deploy.sh                 build → side-load → six helm upgrades. THE only supported local deploy.
 ├── registry.sh               the registry + the CA trust both docker daemons need. Idempotent.
 ├── secrets.sh                seal / show / recover / list
 └── bootstrap/                applied once with kubectl, deliberately NOT owned by Helm:
@@ -210,7 +230,7 @@ Sharp edges, each of which has already bitten once:
 
 ## Why nginx and not Ingress annotations
 
-Routing lives in `chart/files/nginx.conf`, and the Ingress is a dumb front door that hands it
+Routing lives in `charts/platform-infra/files/nginx.conf`, and the Ingress is a dumb front door that hands it
 everything. Don't "simplify" this by moving the path map into Ingress rules — the conf also splits by
 Host, makes the *public* dashboard API read-only, and rewrites the api host's `/api/…` onto the
 gateway's `/vmcp/api/…`. Those need `configuration-snippet`, disabled by default since

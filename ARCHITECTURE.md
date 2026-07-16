@@ -27,7 +27,7 @@ namespace, one Cloudflare tunnel. This is a description of what exists, not a pl
 ║                                   │ http (plain — TLS ended at Cloudflare)            ║
 ║                          ┌────────▼────────┐                                          ║
 ║       Ingress ─────────► │  nginx  :8080   │  ◄── THE ROUTER. Splits by Host AND path ║
-║   (local access only)    └───┬────┬────┬───┘      Config: chart/files/nginx.conf      ║
+║   (local access only)    └───┬────┬────┬───┘   charts/platform-infra/files/nginx.conf ║
 ║                              │    │    │                                              ║
 ║          ┌───────────────────┘    │    └────────────────┐                             ║
 ║          │                        │                     │                             ║
@@ -137,7 +137,7 @@ That is exactly why `fvt-traffic` targets the per-slug route: the test suite ass
 
 ## 4. Public hostnames
 
-All three arrive on `nginx:8080` and are split by `Host` header (`chart/files/nginx.conf`).
+All three arrive on `nginx:8080` and are split by `Host` header (`charts/platform-infra/files/nginx.conf`).
 
 | Host | Serves | Notes |
 | --- | --- | --- |

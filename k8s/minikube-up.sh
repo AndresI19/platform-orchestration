@@ -77,5 +77,5 @@ cat <<'EOF'
         # then: http://localhost:8081/   /cloud-developer-quiz/   /vmcp/   /mcp
 
     The public site is NOT served from here — deploy it with `./k8s/deploy.sh public`
-    (chart/values-public.yaml), and read its cutover note before applying it.
+    (charts/platform-infra/values-public.yaml), and read its cutover note before applying it.
 EOF

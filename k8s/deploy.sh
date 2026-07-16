@@ -18,15 +18,31 @@
 #   * clean tree → the commit sha           e.g. platform-home:0fcc7de
 #   * dirty tree → sha + a hash of the diff e.g. platform-home:0fcc7de-dirty.a1b2c3d
 #
-# The tag then rides into the release as a Helm VALUE (apps.<app>.image.tag), so the Pod spec changes
-# on every deploy and Helm performs a real rolling update. No `rollout restart` anywhere.
+# The tag then rides into the release as a Helm VALUE (image.tag), so the Pod spec changes on every
+# deploy and Helm performs a real rolling update. No `rollout restart` anywhere.
 #
 # WHY HELM, NOT kustomize: the tag no longer lives in a committed file. It lives in the Helm release,
 # which is server-side state — so there is nothing for a later `apply` to revert to (the old kustomize
 # `images:` pins-vs-`set image` conflict is gone), every deploy is a versioned, rollback-able release
-# (`helm history platform`, `helm rollback platform`), and the versions are resolved into values
+# (`helm history <release>`, `helm rollback <release>`), and the versions are resolved into values
 # BEFORE the deploy, so the release itself is versioned and the version-writer hook renders
-# platform-version.json from exactly what was deployed. See chart/ and templates/hooks/version-writer.yaml.
+# platform-version.json from exactly what was deployed. See charts/platform-infra/templates/hooks/.
+#
+# ---------------------------------------------------------------------------------------------
+# ONE RELEASE PER COMPONENT — this script deploys SIX releases, not one.
+#
+# `platform-infra` (the router, the databases, the tunnel, platform-config, the version spec) plus one
+# release per service, each rendered from the generic `charts/service` chart and the service's OWN
+# deploy/<name>.values.yaml, which lives in the repo that ships it. The umbrella `platform` release and
+# its `chart/` are gone: one release rendering every app forced CI to deploy with `--reuse-values`,
+# which made the RELEASE (not the chart) the source of truth and silently broke both directions — a key
+# deleted from the chart lived on forever, a key added never arrived.
+#
+# This path and CI now deploy THE SAME six releases from THE SAME charts and values files; they differ
+# only in where the image comes from. CI pulls `registry:5000/<name>:<version>` and overrides
+# image.repo to say so; this script side-loads `platform-<name>:<tag>` and leaves image.repo at the
+# local default the values file already carries. That is the whole difference, and it is why the values
+# files are not duplicated here any more.
 #
 # BOOTSTRAP FIRST: the namespace, SealedSecrets and the three PVCs are NOT in the chart (they are in
 # k8s/bootstrap/, applied with kubectl). They must exist before the first deploy — the version-writer
@@ -50,7 +66,9 @@ if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx minikube; then
   fi
 fi
 
-# app name -> source repo (relative to this repo)
+# app name -> build context (relative to this repo). This is what `docker build` is pointed at, and
+# what the component's version is diffed against — for the two components that share a repo, it is a
+# SUBTREE of that repo, which is exactly the point (editing home must not stamp platform-auth).
 APPS=(home quiz vmcp rs-mcp-server platform-auth)
 declare -A REPO=(
   [home]=../project-platform/portfolio-home
@@ -58,6 +76,21 @@ declare -A REPO=(
   [vmcp]=../open-vMCP
   [rs-mcp-server]=../rs-mcp-server
   [platform-auth]=../project-platform/platform-auth
+)
+
+# app name -> its deploy values, owned by the repo that ships the component. NOT derivable from REPO
+# above: the values live at the REPO ROOT's deploy/ directory, while the build context may be a subtree
+# of it (project-platform ships both home and platform-auth, and one deploy/ holds both files).
+#
+# These are the same files CI deploys from — the single source of truth for each service's Deployment
+# and Service. They used to be duplicated into this repo's deploy-values/ during the split; that copy
+# is gone, because two files that must stay identical eventually don't.
+declare -A VALUES_FILE=(
+  [home]=../project-platform/deploy/home.values.yaml
+  [quiz]=../data-driven-quiz-server/deploy/quiz.values.yaml
+  [vmcp]=../open-vMCP/deploy/vmcp.values.yaml
+  [rs-mcp-server]=../rs-mcp-server/deploy/rs-mcp-server.values.yaml
+  [platform-auth]=../project-platform/deploy/platform-auth.values.yaml
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -129,6 +162,19 @@ BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 PLATFORM_VERSION="$(component_version "$ROOT")"
 echo "==> Platform ${PLATFORM_VERSION}"
 
+# Fail before building anything if a component's values file is missing. Without this the helm upgrade
+# would still "succeed" — against the generic chart's own defaults, which describe no real service —
+# and deploy a component-shaped nothing. The sibling repo is a working copy here, so the usual cause is
+# simply that it is not checked out, which is worth saying in one line at the top rather than as a
+# render error twenty lines down. CI makes the same check for the same reason.
+for app in "${APPS[@]}"; do
+  [ -f "$ROOT/${VALUES_FILE[$app]}" ] || {
+    echo "FATAL: ${app} has no deploy values at ${VALUES_FILE[$app]}" >&2
+    echo "       that file is owned by the repo shipping ${app}; is the sibling repo checked out?" >&2
+    exit 1
+  }
+done
+
 echo "==> Building"
 for app in "${APPS[@]}"; do
   repo="${REPO[$app]}"
@@ -166,27 +212,49 @@ for app in "${APPS[@]}"; do
 done
 
 # ---------------------------------------------------------------------------------------------
-# Deploy: one Helm release, versions resolved into values BEFORE the upgrade.
+# Deploy: six releases, versions resolved into values BEFORE each upgrade.
 #
-# The tags and versions become --set values, so the release is the single source of truth for what is
-# deployed, `helm history platform` records every revision, and `helm rollback platform` reverts both
-# the images AND (via the post-rollback hook) the reported version. --rollback-on-failure rolls a failed deploy back
-# on its own; --wait blocks until every workload AND the version-writer hook are done, so a version
-# write that home cannot read fails the deploy loudly rather than silently.
-echo "==> Deploying (helm upgrade --install platform)"
-HELM_SET=(--set "platform.version=${PLATFORM_VERSION}")
-for app in "${APPS[@]}"; do
-  HELM_SET+=(--set "apps.${app}.image.tag=${TAG[$app]}"
-             --set "apps.${app}.version=${VERSION[$app]}")
-done
-VALUES=()
-[ "$OVERLAY" = "public" ] && VALUES=(-f "$ROOT/chart/values-public.yaml")
+# The tags and versions become --set values, so each release is the single source of truth for what is
+# deployed, `helm history <release>` records every revision, and `helm rollback <release>` reverts the
+# images (and, for platform-infra, the reported version via the post-rollback hook).
+# --rollback-on-failure rolls a failed deploy back on its own; --wait blocks until the workload is
+# actually ready, so a broken deploy fails loudly here rather than silently.
+#
+# INFRA FIRST, and not merely for tidiness: platform-config and the databases are what the services
+# read at startup, and the version-writer hook (post-install/upgrade on THIS release) needs the content
+# PVC. A service that starts before its config exists reads an empty env and has to be restarted.
+#
+# The library subchart is vendored, never committed (.gitignore'd, same as CI does with
+# `helm dependency build`) — without this the charts cannot render at all.
+echo "==> Vendoring chart dependencies"
+helm dependency build "$ROOT/charts/platform-infra" >/dev/null
+helm dependency build "$ROOT/charts/service" >/dev/null
 
-helm upgrade --install platform "$ROOT/chart" \
+INFRA_VALUES=()
+[ "$OVERLAY" = "public" ] && INFRA_VALUES=(-f "$ROOT/charts/platform-infra/values-public.yaml")
+
+echo "==> Deploying platform-infra (${PLATFORM_VERSION}${OVERLAY:+, ${OVERLAY} overlay})"
+helm upgrade --install platform-infra "$ROOT/charts/platform-infra" \
   --namespace platform --create-namespace \
-  "${VALUES[@]}" "${HELM_SET[@]}" \
+  "${INFRA_VALUES[@]}" \
+  --set "platform.version=${PLATFORM_VERSION}" \
   --wait --rollback-on-failure --timeout 5m
+
+# Each service: the generic chart + the service repo's own values + this deploy's image identity.
+# image.repo is deliberately NOT set — the values file already defaults it to the side-loaded
+# `platform-<name>`, and CI is the one that overrides it to the registry. Setting it here would
+# duplicate that knowledge in the one place that does not need it.
+for app in "${APPS[@]}"; do
+  echo "==> Deploying ${app} (${VERSION[$app]})"
+  helm upgrade --install "$app" "$ROOT/charts/service" \
+    --namespace platform \
+    -f "$ROOT/${VALUES_FILE[$app]}" \
+    --set "image.tag=${TAG[$app]}" \
+    --set "version=${VERSION[$app]}" \
+    --wait --rollback-on-failure --timeout 5m
+done
 
 echo "==> Deployed  (platform ${PLATFORM_VERSION})"
 kubectl -n platform get deploy -o custom-columns='NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image' --no-headers | sed 's/^/    /'
-echo "    helm history platform   # revisions      helm rollback platform <n>   # revert"
+echo "    helm history <release>   # revisions      helm rollback <release> <n>   # revert"
+echo "    releases: platform-infra ${APPS[*]}"

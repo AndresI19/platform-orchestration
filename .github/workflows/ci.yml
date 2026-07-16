@@ -9,11 +9,20 @@ on:
 # Kubernetes YAML (misconfigurations: missing securityContext, no resource limits, writable root
 # filesystems, and so on) rather than an image scan.
 #
-# The platform runs on HELM now, not kustomize, and both jobs reflect that: the workloads live in the
-# chart, so both the schema-validation and the security scan render the chart with `helm template`
-# and check the OUTPUT. Rendering the two value sets — local defaults and the public overlay — covers
-# both the local and the live topology. k8s/ no longer holds workloads; it is bootstrap only
-# (namespace, PVCs, sealed secrets, the deployer RBAC), and is scanned separately.
+# The platform runs on HELM, split into per-component releases: `platform-infra` (router, databases,
+# tunnel, config, version spec) plus one release per service, each rendered from the generic
+# `charts/service` chart and the service's OWN deploy/<name>.values.yaml.
+#
+# THAT SPLIT IS WHY THE SIBLING REPOS ARE CHECKED OUT BELOW. The umbrella chart used to hold every
+# app, so rendering it here scanned every workload. The services' values now live in the repos that
+# ship them — so rendering only what THIS repo owns would scan the infra and silently stop scanning the
+# five app workloads, while still reporting green. A gate that protects nothing but still passes is
+# worse than no gate, so CI renders each service exactly as a deploy does: our chart, their values.
+# They are public repos; the default GITHUB_TOKEN reads them with no extra credential.
+#
+# Rendering the two infra value sets — local defaults and the public overlay — covers both the local
+# and the live topology. k8s/ no longer holds workloads; it is bootstrap only (namespace, PVCs, sealed
+# secrets, the deployer RBAC), and is scanned separately.
 #
 # config-scan is a BLOCKING gate (exit-code 1) at HIGH,CRITICAL. Every workload is hardened — pod- and
 # container-level securityContext, readOnlyRootFilesystem with writable mounts only where a path needs
@@ -24,16 +33,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: AndresI19/project-platform, path: repos/project-platform }
+      - uses: actions/checkout@v4
+        with: { repository: AndresI19/data-driven-quiz-server, path: repos/data-driven-quiz-server }
+      - uses: actions/checkout@v4
+        with: { repository: AndresI19/open-vMCP, path: repos/open-vMCP }
+      - uses: actions/checkout@v4
+        with: { repository: AndresI19/rs-mcp-server, path: repos/rs-mcp-server }
       - name: Install helm
         run: |
           curl -sSL "https://get.helm.sh/helm-v4.2.3-linux-amd64.tar.gz" | tar xz
           sudo mv linux-amd64/helm /usr/local/bin/
-      - name: Render the chart (local + public)
-        run: |
-          set -euo pipefail
-          mkdir -p rendered
-          helm template platform chart                             > rendered/local.yaml
-          helm template platform chart -f chart/values-public.yaml > rendered/public.yaml
+      - name: Render every release (infra local + public, and each service)
+        run: ./scripts/render-all.sh rendered
       # The workloads — the actual thing the gate protects. Hardened, so this is clean; a regression
       # (a Pod with no securityContext, a container without resource limits) fails the PR here.
       - name: Trivy config scan (rendered workloads)
@@ -59,19 +72,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Render the chart and schema-validate it — the "lint" for a Helm platform. helm template catches
-      # a broken/unrenderable template; kubeconform -strict catches an invalid manifest (a typo'd
-      # apiVersion, a misindented field) before it reaches the cluster. SealedSecret is a CRD with no
-      # public schema, so -ignore-missing-schemas skips it rather than erroring.
+      - uses: actions/checkout@v4
+        with: { repository: AndresI19/project-platform, path: repos/project-platform }
+      - uses: actions/checkout@v4
+        with: { repository: AndresI19/data-driven-quiz-server, path: repos/data-driven-quiz-server }
+      - uses: actions/checkout@v4
+        with: { repository: AndresI19/open-vMCP, path: repos/open-vMCP }
+      - uses: actions/checkout@v4
+        with: { repository: AndresI19/rs-mcp-server, path: repos/rs-mcp-server }
+      # Render the charts and schema-validate them — the "lint" for a Helm platform. helm template
+      # catches a broken/unrenderable template; kubeconform -strict catches an invalid manifest (a
+      # typo'd apiVersion, a misindented field) before it reaches the cluster. SealedSecret is a CRD
+      # with no public schema, so -ignore-missing-schemas skips it rather than erroring.
       - name: Install helm + kubeconform
         run: |
           curl -sSL "https://get.helm.sh/helm-v4.2.3-linux-amd64.tar.gz" | tar xz
           curl -sSL "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz" | tar xz kubeconform
           sudo mv linux-amd64/helm kubeconform /usr/local/bin/
-      - name: Render + schema-validate (local + public)
+      - name: Render + schema-validate every release
         run: |
           set -euo pipefail
-          for values in "" "-f chart/values-public.yaml"; do
-            echo "== helm template ${values:-(defaults)} =="
-            helm template platform chart $values | kubeconform -strict -ignore-missing-schemas -summary -
+          ./scripts/render-all.sh rendered
+          for f in rendered/*.yaml; do
+            echo "== kubeconform $f =="
+            kubeconform -strict -ignore-missing-schemas -summary "$f"
           done
