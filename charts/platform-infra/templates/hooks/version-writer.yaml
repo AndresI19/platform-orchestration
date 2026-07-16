@@ -15,9 +15,18 @@ This is a Helm HOOK, not a normal resource, and that is the whole design:
   * It fires on post-rollback too, so `helm rollback platform-infra` rewrites the file to the
     rolled-back version.
 
-Writing needs a pod because the volume only exists in the cluster, and it mounts the PVC read-WRITE —
-which home deliberately cannot (a web server must not rewrite the record of what is deployed). busybox
-is used because it is already in the node and needs no pull.
+Writing needs a pod because the volume only exists in the cluster, so this Job mounts the PVC
+read-WRITE. busybox is used because it is already in the node and needs no pull.
+
+WHAT PROTECTS THIS FILE. It used to be the mount: home held the volume read-only and simply could not
+rewrite the record of what is deployed. That is no longer true — home mounts /content read-write so
+its admin upload route can replace the résumé without a rollout (project-platform, src/server/content.ts).
+Nothing at the filesystem layer stops it now: the volume is owned 1000:1000, home runs as uid 1000,
+and POSIX takes rename/unlink permission from the DIRECTORY's write bit rather than the target file's
+owner. What keeps this file the deploy pipeline's alone is home's ALLOWLIST, which admits exactly
+resume.pdf and cards/<name>.yaml and is tested against precisely this path. If that allowlist ever
+widens, this file loses its last protection — so it is named here, where the next reader of this
+comment will be looking.
 */ -}}
 {{- $spec := dict "platform" .Values.platform.version "deployedAt" (now | date "2006-01-02T15:04:05Z07:00") -}}
 apiVersion: batch/v1
