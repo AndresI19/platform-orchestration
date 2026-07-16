@@ -9,16 +9,19 @@ ported from has been deleted; there is one way to run the platform now.
 ## Layout
 
 ```
-chart/                          the Helm chart — the platform's topology, ONE release named `platform`
-├── values.yaml                 local defaults; image tags + versions come from deploy.sh --set
-├── values-public.yaml          + cloudflared and the real hostnames — the public site
-├── files/nginx.conf            THE ROUTING TABLE — path map + vhost split
-└── templates/                  _app.tpl + apps.yaml (the six apps), postgres.yaml (the two dbs),
-                                nginx.yaml, cloudflared.yaml, config.yaml, ingress.yaml,
-                                hooks/version-writer.yaml (writes platform-version.json to the PVC)
+charts/
+├── platform-infra/             release 1 of 6 — what the services sit behind
+│   ├── values.yaml             local defaults; platform.version comes from deploy.sh --set
+│   ├── values-public.yaml      + cloudflared and the real hostnames — the public site
+│   ├── files/nginx.conf        THE ROUTING TABLE — path map + vhost split
+│   └── templates/              postgres.yaml (the two dbs), nginx.yaml, cloudflared.yaml,
+│                               config.yaml, ingress.yaml, hooks/version-writer.yaml
+├── service/                    releases 2–6 — the generic service chart. Each service is this chart
+│                               plus its OWN repo's deploy/<name>.values.yaml. No values live here.
+└── lib/                        the shared platform.app helper; vendored by `helm dependency build`
 k8s/
 ├── minikube-up.sh              cold-boot bring-up (delegates to deploy.sh)
-├── deploy.sh                   build → side-load → helm upgrade --install. THE deploy.
+├── deploy.sh                   build → side-load → six helm upgrades. THE local deploy.
 ├── registry.sh · secrets.sh
 └── bootstrap/                  applied once with kubectl, deliberately NOT owned by Helm:
     ├── namespace.yaml
@@ -36,9 +39,13 @@ kubectl -n platform port-forward svc/nginx 8081:8080
 
 Then `http://localhost:8081/`, `/cloud-developer-quiz/`, `/vmcp/`, and `/mcp`.
 
-To redeploy after a code change: `./k8s/deploy.sh`. Every deploy is a Helm release — `helm history
-platform` lists the revisions and `helm rollback platform <n>` reverts (images *and* the reported
-version move together). Secrets and the PVCs are **bootstrap**: `kubectl apply -f k8s/bootstrap/` once,
+To redeploy after a code change: `./k8s/deploy.sh`. It deploys **six releases** — `platform-infra`
+plus one per service — so history and rollback are per component: `helm history quiz` lists that
+service's revisions and `helm rollback quiz <n>` reverts it alone, without touching its siblings.
+(That independence is the whole reason for the split; one release covering every app forced CI to
+deploy with `--reuse-values`, which quietly made the release, not the chart, the source of truth.)
+The reported platform version moves with `platform-infra`, whose post-rollback hook rewrites it.
+Secrets and the PVCs are **bootstrap**: `kubectl apply -f k8s/bootstrap/` once,
 before the first deploy (`minikube-up.sh` does this for you). The secrets are sealed into those
 manifests, so there is no out-of-band `kubectl create secret` step. See
 [Secrets are sealed](#secrets-are-sealed).
