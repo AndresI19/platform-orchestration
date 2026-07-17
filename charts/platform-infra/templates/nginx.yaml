@@ -46,9 +46,7 @@ spec:
           image: {{ .Values.nginx.image }}
           ports: [{ containerPort: 8080 }]
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            {{- include "platform.containerSecurity" (dict) | nindent 12 }}
           volumeMounts:
             - { name: conf, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf, readOnly: true }
             - { name: run, mountPath: /var/run }

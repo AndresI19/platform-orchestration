@@ -44,9 +44,7 @@ spec:
           image: {{ .image | default $img }}
           imagePullPolicy: IfNotPresent
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            {{- include "platform.containerSecurity" (dict) | nindent 12 }}
           command: {{ .command | toJson }}
           {{- with .volumeMounts }}
           volumeMounts:
@@ -64,9 +62,7 @@ spec:
           ports: [{ containerPort: {{ . }} }]
           {{- end }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            {{- include "platform.containerSecurity" (dict) | nindent 12 }}
           {{- with $app.env }}
           env:
             {{- toYaml . | nindent 12 }}

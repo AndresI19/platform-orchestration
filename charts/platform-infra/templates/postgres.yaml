@@ -34,9 +34,7 @@ spec:
           image: postgres:16
           securityContext:
             runAsUser: 0
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"], add: ["CHOWN"] }
+            {{- include "platform.containerSecurity" (dict "add" (list "CHOWN")) | nindent 12 }}
           command: ["sh", "-c", "chown 999:999 /var/run/postgresql /tmp"]
           volumeMounts:
             - { name: run, mountPath: /var/run/postgresql }
@@ -49,9 +47,7 @@ spec:
           image: postgres:16
           ports: [{ containerPort: 5432 }]
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            {{- include "platform.containerSecurity" (dict) | nindent 12 }}
           envFrom:
             - secretRef: { name: {{ $db.secretName }} }
           volumeMounts:

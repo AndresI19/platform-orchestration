@@ -29,9 +29,7 @@ spec:
           image: {{ .Values.cloudflared.image }}
           args: ["tunnel", "--no-autoupdate", "run"]
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            {{- include "platform.containerSecurity" (dict) | nindent 12 }}
           env:
             # NOT optional: a missing token should stop the Pod loudly, not start a connector that
             # silently serves nothing. Created out-of-band; sealed in k8s/bootstrap/.
