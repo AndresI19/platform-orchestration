@@ -162,10 +162,9 @@ for app in "${APPS[@]}"; do
   args=(--build-arg "VERSION=${VERSION[$app]}"
         --build-arg "GIT_SHA=$(git -C "$repo" rev-parse --short HEAD)"
         --build-arg "BUILD_DATE=${BUILD_DATE}")
-  case "$app" in
-    quiz) docker build -q -t "$img" "${args[@]}" --build-arg BASE_PATH=/cloud-developer-quiz/ "$repo" >/dev/null ;;
-    *) docker build -q -t "$img" "${args[@]}" "$repo" >/dev/null ;;
-  esac
+  # quiz is served under a sub-path, so it alone needs a BASE_PATH; every app builds the same way otherwise.
+  [ "$app" = quiz ] && args+=(--build-arg BASE_PATH=/cloud-developer-quiz/)
+  docker build -q -t "$img" "${args[@]}" "$repo" >/dev/null
   echo "    $img"
 done
 
@@ -174,10 +173,10 @@ for app in "${APPS[@]}"; do
   img="platform-${app}:${TAG[$app]}"
   if image_in_cluster "$img"; then
     echo "    $img (already in cluster)"
-  else
-    echo "    $img"
-    push_to_cluster "$img"
+    continue
   fi
+  echo "    $img"
+  push_to_cluster "$img"
 done
 
 # Deploy: six releases, versions resolved into --set values before each upgrade, so each release is the

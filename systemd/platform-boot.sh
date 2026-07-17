@@ -178,8 +178,12 @@ SITE_REPORT=""
 DEGRADED=0
 for path in / /cloud-developer-quiz/ /vmcp/ /resume.pdf; do
   code="$(curl -sL -o /dev/null -w '%{http_code}' --max-time 25 "${SITE}${path}" 2>/dev/null || echo 000)"
-  [[ "$code" == "200" ]] || DEGRADED=1
-  mark=$([[ "$code" == "200" ]] && echo "✅" || echo "⚠️")
+  if [[ "$code" == "200" ]]; then
+    mark="✅"
+  else
+    mark="⚠️"
+    DEGRADED=1
+  fi
   SITE_REPORT+="${mark} \`${path}\` — ${code}"$'\n'
   echo "    ${path} -> ${code}"
 done
