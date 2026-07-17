@@ -112,5 +112,5 @@ case "${1:-}" in
   show)    shift; cmd_show "$@" ;;
   recover) shift; cmd_recover "$@" ;;
   list)    shift; cmd_list "$@" ;;
-  *) sed -n '19,30p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '19,30{s/^# \{0,1\}//;p}' "$0"; exit 1 ;;
 esac

@@ -18,7 +18,7 @@
 # taking it means `minikube delete`, destroying the sealed-secrets keypair (the only thing that can
 # decrypt every committed sealed-*.yaml). Instead we issue our own CA: docker reads a per-registry CA
 # from /etc/docker/certs.d/<host>:<port>/ca.crt with NO daemon restart and NO cluster recreate.
-set -Eeuo pipefail
+set -euo pipefail   # no ERR trap here, so -E (errtrace) would be inert — matches k8s/minikube-up.sh
 
 export PATH="/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin"
 

@@ -39,7 +39,7 @@ OVERLAY="${1:-}" # pass "public" to layer the public front door (values-public.y
 # port changes on every `minikube start`, so re-derive it. Skips quietly if minikube isn't up.
 if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx minikube; then
   APISERVER_PORT="$(docker port minikube 8443 2>/dev/null | head -1 | sed 's/.*://')"
-  if [ -n "${APISERVER_PORT:-}" ]; then
+  if [ -n "$APISERVER_PORT" ]; then
     kubectl config set-cluster minikube --server="https://127.0.0.1:${APISERVER_PORT}" >/dev/null 2>&1 || true
     echo "==> kubeconfig -> https://127.0.0.1:${APISERVER_PORT}"
   fi
