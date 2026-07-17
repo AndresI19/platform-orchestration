@@ -176,13 +176,12 @@ Three things about that are deliberate:
 > instead, writing nothing to the working tree, so the diff needs no special-case and the platform
 > version is honest again — including catching a genuine hand edit that the exclusion used to hide.
 
-> **The writer `chmod 0644`s the spec and ASSERTS the mode.** The version-writer hook renders the
-> file from Helm values, writes it, and asserts the mode is `644` before exiting — so home's
-> DIFFERENT user can read it. A `test -r` check would NOT catch a bad mode: the writer runs as root,
-> and root can read a `0600` file, so the question is whether a different user can. Because it is a
-> `--wait`/`--rollback-on-failure` hook, a failed write rolls the whole deploy back rather than landing a
-> `/version` that reports `null`. (Historically this bit as a `kubectl cp` tar stream carrying a
-> local `0600` mode into the volume.)
+> **The writer `chmod 0644`s the spec and ASSERTS the mode.** The version-writer hook runs as uid
+> 1000 (non-root, like every workload), renders the file from Helm values, writes it, and asserts the
+> mode is `644` — public content stays world-readable, and a mode regression fails loudly instead of
+> silently. Because it is a `--wait`/`--rollback-on-failure` hook, a bad write rolls the whole deploy
+> back rather than landing a `/version` that reports `null`. (Historically this bit as a `kubectl cp`
+> tar stream carrying a local `0600` mode into the volume.)
 
 `GET /version` → `{ version, platform }` · `GET /api/versions` → `{ platform, components: {…} }`.
 `platform` is a sibling of `components`, not one of them: it has no image, no Pod and no Service.
@@ -241,9 +240,13 @@ Sharp edges, each of which has already bitten once:
 
 Routing lives in `charts/platform-infra/files/nginx.conf`, and the Ingress is a dumb front door that hands it
 everything. Don't "simplify" this by moving the path map into Ingress rules — the conf also splits by
-Host, makes the *public* dashboard API read-only, and rewrites the api host's `/api/…` onto the
-gateway's `/vmcp/api/…`. Those need `configuration-snippet`, disabled by default since
-CVE-2021-25742. One routing table, not two.
+Host, guards `/mcp` on the front-end host (a 404 naming the api host), and rewrites the api host's
+`/api/…` onto the gateway's `/vmcp/api/…`. Those need `configuration-snippet`, disabled by default
+since CVE-2021-25742. One routing table, not two.
+
+(Dashboard write authorisation is no longer nginx's job: the old `limit_except` method filter is gone,
+replaced by the gateway's own signed-admin-claim check. nginx cannot read a JWT, so it cannot tell an
+admin from anyone else.)
 
 ## Conventions
 

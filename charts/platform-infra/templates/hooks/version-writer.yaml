@@ -1,7 +1,7 @@
 {{- /*
 Writes platform-version.json onto the content PVC — the platform's OWN version (the orchestration repo
-ships no image, so its version cannot ride in one). home mounts /content read-only and serves this at
-/version and /api/versions, per request, so this updates the reported version with no rollout of home.
+ships no image, so its version cannot ride in one). home serves this at /version and /api/versions,
+read per request, so a redeploy updates the reported version with no rollout of home.
 
 Only `platform` is written now. Under the umbrella chart this Job also rendered a `components` map from
 every app's values, but home never read it — `versions.ts` reads only `spec.platform` and gets each
@@ -70,8 +70,8 @@ spec:
               drop: ["ALL"]
           # The spec is rendered by Helm from values (single-line toJson — our version never contains a
           # single quote, so single-quoting is safe). 0644 because everything on this volume is public
-          # content and home mounts it read-only; the mode is ASSERTED, not `test -r`, so a regression
-          # that leaves the file unreadable by home fails the deploy loudly rather than serving null.
+          # content; the mode is ASSERTED, not `test -r`, so a regression that leaves the file
+          # unreadable by home fails the deploy loudly rather than serving null.
           command:
             - sh
             - -c
