@@ -104,6 +104,11 @@ content_tag() {
   fi
 }
 
+# Does the minikube node's OWN docker daemon already hold this image? Its daemon is separate from
+# Colima's, so this is `minikube ssh`, not a host `docker` call — asked both to skip a redundant
+# side-load and to prove one landed.
+image_in_cluster() { minikube ssh -- "docker image inspect $1 >/dev/null 2>&1"; }
+
 # Get the image into the cluster's OWN docker daemon (the minikube node runs its own, separate from
 # Colima's). `minikube image load` is NOT used: it silently no-ops on an existing tag — see above.
 push_to_cluster() {
@@ -113,7 +118,7 @@ push_to_cluster() {
   minikube cp "$tar" /home/docker/img.tar >/dev/null
   minikube ssh -- "docker load -i /home/docker/img.tar >/dev/null && rm -f /home/docker/img.tar"
   rm -f "$tar"
-  minikube ssh -- "docker image inspect $img >/dev/null 2>&1" \
+  image_in_cluster "$img" \
     || { echo "FATAL: $img is not in the cluster after load" >&2; exit 1; }
 }
 
@@ -167,7 +172,7 @@ done
 echo "==> Publishing into the cluster"
 for app in "${APPS[@]}"; do
   img="platform-${app}:${TAG[$app]}"
-  if minikube ssh -- "docker image inspect $img >/dev/null 2>&1"; then
+  if image_in_cluster "$img"; then
     echo "    $img (already in cluster)"
   else
     echo "    $img"

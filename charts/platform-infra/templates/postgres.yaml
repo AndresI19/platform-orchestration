@@ -31,7 +31,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       initContainers:
         - name: fix-perms
-          image: postgres:16
+          image: {{ $.Values.postgres.image }}
           securityContext:
             runAsUser: 0
             {{- include "platform.containerSecurity" (dict "add" (list "CHOWN")) | nindent 12 }}
@@ -44,7 +44,7 @@ spec:
             limits: { memory: 32Mi }
       containers:
         - name: postgres
-          image: postgres:16
+          image: {{ $.Values.postgres.image }}
           ports: [{ containerPort: 5432 }]
           securityContext:
             {{- include "platform.containerSecurity" (dict) | nindent 12 }}
