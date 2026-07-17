@@ -1,8 +1,7 @@
 {{- /*
 One platform service: a Deployment (and, unless service:false, a Service), rendered by the shared
 platform.app helper from platform-lib. The service supplies its own values via deploy/values.yaml —
-name, image, port, probe(s), env, initContainers, volumeMounts/volumes — exactly the fields that used
-to live in the umbrella chart's apps.<name> block. The shared boilerplate (securityContext, /tmp mount,
-labels) stays in the helper, so every service renders identically to how the umbrella did.
+name, image, port, probe(s), env, initContainers, volumeMounts/volumes. Shared boilerplate
+(securityContext, /tmp mount, labels) stays in the helper.
 */ -}}
 {{ include "platform.app" (dict "name" .Values.name "app" .Values "root" $) }}

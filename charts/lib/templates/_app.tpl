@@ -2,12 +2,10 @@
 platform.app — renders a Deployment (and, unless service:false, a Service) for one platform service.
 Called from charts/service's deployment.yaml with dict "name" <string> "app" <values entry> "root" $.
 
-Everything the services share lives here: the pod securityContext (uid 1000, read-only fs), the
-container securityContext, imagePullPolicy, the always-present /tmp emptyDir, and the single `app`
-label. Everything that varies rides in the values entry — env, initContainers, extra
-volumeMounts/volumes, probes, port, strategy — and is spliced in with toYaml.
-
-An initContainer that omits `image` inherits the app image, so the seed steps (home, quiz) copy from
+Shared boilerplate lives here: pod + container securityContext (uid 1000, read-only fs),
+imagePullPolicy, the always-present /tmp emptyDir, the `app` label. What varies rides in the values
+entry — env, initContainers, volumeMounts/volumes, probes, port, strategy — spliced in with toYaml.
+An initContainer omitting `image` inherits the app image, so the seed steps (home, quiz) copy from
 exactly the version being deployed.
 */}}
 {{- define "platform.app" -}}

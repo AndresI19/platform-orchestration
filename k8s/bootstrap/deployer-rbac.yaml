@@ -1,24 +1,21 @@
 # The identity the CI/CD runner deploys as.
 #
-# It is NOT the admin kubeconfig, and it deliberately cannot be. The runner is a container; the
-# host's kubeconfig authenticates with client certificates under ~/.minikube, which sits OUTSIDE the
-# one directory colima mounts into the VM — so no container can read them. Rather than widen that
-# mount (the thing that stops a CI job reading ~/.ssh, the tunnel token and the sealed-secrets master
-# key), the runner gets an identity of its own, scoped to exactly what a deploy does.
-#
-# What a deploy does, and therefore all this may do:
+# NOT the admin kubeconfig, and deliberately cannot be: the runner is a container, and the host's
+# kubeconfig authenticates with client certs under ~/.minikube, OUTSIDE the one directory colima mounts
+# into the VM — so no container can read them. Rather than widen that mount (the thing that stops a CI
+# job reading ~/.ssh, the tunnel token, the sealed-secrets master key), the runner gets its own identity
+# scoped to exactly what a deploy does:
 #   * `helm upgrade` the release: apply Deployments/Services/ConfigMaps/Ingress and watch the rollout
-#   * read and write the Helm RELEASE-STATE Secret (sh.helm.release.v1.platform.*) Helm keeps in-namespace
+#   * read/write the Helm RELEASE-STATE Secret (sh.helm.release.v1.platform.*) Helm keeps in-namespace
 #   * run the version-writer hook Job (writes platform-version.json onto the content PV)
 #
-# THE SECRETS TRADE, stated plainly. Helm stores release state as a Secret, and `helm upgrade` cannot
-# work without reading and writing it — so this identity is granted `secrets`, which necessarily also
-# lets it read the app secrets (Postgres passwords, the auth signing key, the tunnel token). That is a
-# deliberate widening of the original "the deployer cannot read Secrets" boundary, accepted because this
-# is a single-developer platform on one trusted machine: the threat that boundary guarded — a shared or
-# hosted runner exfiltrating secrets — does not apply here. It is still NOT cluster-admin, and it still
-# cannot touch Roles, RoleBindings, ServiceAccounts or SealedSecrets — those are bootstrap, applied by
-# the human out-of-band, so a job on the runner cannot grant itself more or rewrite an identity.
+# THE SECRETS TRADE, stated plainly: Helm stores release state as a Secret and `helm upgrade` must
+# read/write it, so this identity is granted `secrets` — which necessarily also reads the app secrets
+# (Postgres passwords, the auth signing key, the tunnel token). A deliberate widening of the original
+# "the deployer cannot read Secrets" boundary, accepted because this is a single-developer platform on
+# one trusted machine: the threat it guarded (a shared/hosted runner exfiltrating secrets) doesn't apply.
+# Still NOT cluster-admin, and still cannot touch Roles, RoleBindings, ServiceAccounts or SealedSecrets
+# — those are bootstrap, applied out-of-band, so a runner job cannot grant itself more or rewrite an identity.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -32,7 +29,7 @@ metadata:
   namespace: platform
 rules:
   # helm upgrade server-side-applies each workload and watches the rollout. `watch` is NOT optional:
-  # `--wait` opens a WATCH, and without it the wait fails and --rollback-on-failure does a FALSE rollback of a deploy
+  # `--wait` opens a WATCH; without it the wait fails and --rollback-on-failure FALSE-rolls-back a deploy
   # that actually succeeded. create/delete because SSA may create a missing object and helm prunes.
   - apiGroups: ["apps"]
     resources: ["deployments"]

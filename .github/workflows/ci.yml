@@ -5,29 +5,24 @@ on:
   push:
     branches: [main]
 
-# This repo ships MANIFESTS, not an image, so the security gate is a Trivy CONFIG scan of the
-# Kubernetes YAML (misconfigurations: missing securityContext, no resource limits, writable root
-# filesystems, and so on) rather than an image scan.
+# This repo ships MANIFESTS, not an image, so the security gate is a Trivy CONFIG scan of the rendered
+# Kubernetes YAML (missing securityContext, no resource limits, writable root fs, …), not an image scan.
 #
-# The platform runs on HELM, split into per-component releases: `platform-infra` (router, databases,
-# tunnel, config, version spec) plus one release per service, each rendered from the generic
-# `charts/service` chart and the service's OWN deploy/<name>.values.yaml.
+# The platform runs on HELM: per-component releases — `platform-infra` (router, databases, tunnel,
+# config, version spec) plus one per service, each from the generic `charts/service` chart and the
+# service's OWN deploy/<name>.values.yaml.
 #
-# THAT SPLIT IS WHY THE SIBLING REPOS ARE CHECKED OUT BELOW. The umbrella chart used to hold every
-# app, so rendering it here scanned every workload. The services' values now live in the repos that
-# ship them — so rendering only what THIS repo owns would scan the infra and silently stop scanning the
-# five app workloads, while still reporting green. A gate that protects nothing but still passes is
-# worse than no gate, so CI renders each service exactly as a deploy does: our chart, their values.
-# They are public repos; the default GITHUB_TOKEN reads them with no extra credential.
+# THAT SPLIT IS WHY THE SIBLING REPOS ARE CHECKED OUT BELOW. The services' values live in the repos
+# that ship them, so rendering only what THIS repo owns would scan the infra and silently stop scanning
+# the five app workloads while still reporting green — a gate that protects nothing but passes, worse
+# than none. So CI renders each service exactly as a deploy does: our chart, their values. Public repos;
+# the default GITHUB_TOKEN reads them with no extra credential.
 #
-# Rendering the two infra value sets — local defaults and the public overlay — covers both the local
-# and the live topology. k8s/ no longer holds workloads; it is bootstrap only (namespace, PVCs, sealed
-# secrets, the deployer RBAC), and is scanned separately.
+# Both infra value sets (local defaults + public overlay) cover the local and live topology. k8s/ is
+# bootstrap only now (namespace, PVCs, sealed secrets, deployer RBAC), scanned separately.
 #
-# config-scan is a BLOCKING gate (exit-code 1) at HIGH,CRITICAL. Every workload is hardened — pod- and
-# container-level securityContext, readOnlyRootFilesystem with writable mounts only where a path needs
-# one — so the scan is clean, and any manifest that regresses below that bar fails its PR here instead
-# of reaching the cluster.
+# config-scan is a BLOCKING gate (exit-code 1) at HIGH,CRITICAL. Every workload is hardened, so the
+# scan is clean and any regression below that bar fails its PR here instead of reaching the cluster.
 jobs:
   config-scan:
     runs-on: ubuntu-latest

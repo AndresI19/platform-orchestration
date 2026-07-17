@@ -1,12 +1,8 @@
-# The platform's persistent volumes — BOOTSTRAP, deliberately kept out of the Helm chart.
-#
-# Why they are not in the chart: a `helm uninstall` (or a botched upgrade) must never be able to take
-# the Postgres data or the résumé/card content down with it. Leaving the PVCs here, applied once with
-# kubectl, means the chart's Deployments reference them by name and Helm never owns — and so never
-# deletes — the data. They are as long-lived as the cluster.
-#
-# The chart's postgres + app Deployments mount these by claimName (platform-content, platform-db,
-# vmcp-db). Applying the chart against a cluster where these already hold data just re-attaches.
+# The platform's persistent volumes — BOOTSTRAP, deliberately out of the Helm chart: a `helm uninstall`
+# (or botched upgrade) must never take the Postgres data or résumé/card content with it. Applied once
+# with kubectl, referenced by the chart's Deployments by name, Helm never owns — so never deletes — the
+# data. As long-lived as the cluster. Mounted by claimName (platform-content, platform-db, vmcp-db);
+# applying the chart where these already hold data just re-attaches.
 ---
 # resume.pdf, the quiz card decks, and platform-version.json (written by the version-writer hook).
 # ReadWriteOnce is honest, not aspirational: minikube's hostPath provisioner is single-node and RWO is
