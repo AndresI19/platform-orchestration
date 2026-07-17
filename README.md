@@ -4,8 +4,8 @@ Orchestration for the personal platform. It runs on **Kubernetes (minikube)**: a
 behind an **nginx** router that reconciles them onto one port by URL path, with a **cloudflared**
 tunnel serving the public site. This repo is the only place the platform's topology is described.
 
-The sibling app repos are the build sources: `../portfolio-home`, `../data-driven-quiz-server`,
-`../open-vMCP`, `../rs-mcp-server`.
+The sibling app repos are the build sources: `../project-platform` (home + platform-auth),
+`../data-driven-quiz-server`, `../open-vMCP`, `../rs-mcp-server`.
 
 ## Path map
 
@@ -19,8 +19,8 @@ The sibling app repos are the build sources: `../portfolio-home`, `../data-drive
 Each app is **base-path aware** (its Vite `base`, router, and server all know their prefix), so nginx
 forwards the prefix **unchanged** and the app resolves its own assets beneath it.
 
-nginx — not the Ingress — owns the routing, because it also splits traffic by Host header, makes the
-public dashboard API read-only, and rewrites the api host's `/api/…` onto the gateway's `/vmcp/api/…`.
+nginx — not the Ingress — owns the routing, because it also splits traffic by Host header, guards
+`/mcp` on the front-end host, and rewrites the api host's `/api/…` onto the gateway's `/vmcp/api/…`.
 None of that is expressible in a stock Ingress. See `k8s/README.md`.
 
 ## Run it
@@ -47,7 +47,7 @@ this cluster.**
 
 | Host | Serves |
 | --- | --- |
-| `andres.project-platform.me` | the front ends (home, quiz, vMCP dashboard). Dashboard API is **read-only**. |
+| `andres.project-platform.me` | the front ends (home, quiz, vMCP dashboard). Dashboard writes need a signed admin token, checked by the gateway. |
 | `api-andres.project-platform.me` | the back end: `/mcp`, the read-only data API, `/health` |
 | `project-platform.me`, `www.*` | 301 → `andres.*` |
 

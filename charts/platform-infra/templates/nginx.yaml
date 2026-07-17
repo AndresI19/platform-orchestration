@@ -1,6 +1,6 @@
 {{- /*
 The router. Its routing table is files/nginx.conf — the single source of routing truth (Host
-split, read-only public dashboard API, the /api → /vmcp/api rewrite), things an Ingress cannot express
+split, the /api → /vmcp/api rewrite, the /mcp guard), things an Ingress cannot express
 without configuration-snippet. The conf is inlined into a ConfigMap, and a checksum/config annotation
 on the pod template rolls the Deployment whenever the conf changes — reproducing what kustomize's
 configMapGenerator hash did (Helm has no generator).

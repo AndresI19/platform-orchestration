@@ -1,7 +1,7 @@
 # Kubernetes (minikube)
 
 **This is how the platform runs.** Every in-cluster workload, every route, the vhost split, the
-read-only public API, the MCP endpoint, and the cloudflared tunnel — verified serving
+public API, the MCP endpoint, and the cloudflared tunnel — verified serving
 project-platform.me from this cluster. (The FVT traffic runner used to live here too; it now runs on
 the host and hits the public API from outside — see platform-cicd.) The docker-compose stack it was
 ported from has been deleted; there is one way to run the platform now.
@@ -102,15 +102,16 @@ unaffected — cloudflared dials *out* from inside the cluster, so it never need
 The original scaffold's Ingress re-derived the path map as Ingress rules. That left two routing
 tables to keep in sync, and it could only express the easy half. `nginx.conf` also:
 
-- makes the **public** dashboard API read-only (`limit_except GET HEAD OPTIONS`) — verified: `POST`
-  returns 403, `GET` returns 200;
 - answers `/mcp` on the front-end host with a 404 naming the api host, so a misconfigured MCP client
   fails loudly rather than getting the SPA's catch-all HTML with a 200;
-- rewrites the api host's clean `/api/…` onto the gateway's own `/vmcp/api/…`.
+- rewrites the api host's clean `/api/…` onto the gateway's own `/vmcp/api/…`;
+- routes `/auth/` and `/.well-known/jwks.json` to platform-auth, since the browser's sign-in gate
+  calls them directly.
 
 None of those are expressible in a stock Ingress — they need `configuration-snippet`, disabled by
 default since CVE-2021-25742. So routing lives in exactly one file and the Ingress is a dumb front
-door that hands everything to nginx.
+door that hands everything to nginx. (Dashboard write authorisation is not nginx's job: the old
+`limit_except` method filter is gone, replaced by the gateway's own signed-admin-claim check.)
 
 The chart hashes `files/nginx.conf` into a `checksum/config` annotation on the pod template, so editing
 the conf changes the Pod spec, which rolls the Deployment. (kustomize did this by hashing the conf into
@@ -190,9 +191,10 @@ stamps the image's version over content you have edited.
 
 Two sharp edges worth knowing:
 
-- **`home` mounts `resume.pdf` as a single file** (`subPath`). A `subPath` that does not exist yet is
-  created by the kubelet as an empty **directory** — which is why the seed initContainer must run
-  first, and why it is an initContainer rather than a Job.
+- **`home` mounts the volume as a directory, NOT a `subPath`.** A `subPath` is resolved once at mount
+  time, so the container keeps reading the inode it started with and never sees a swapped-in file
+  without a rollout — the résumé had exactly this bug until it moved to the directory mount. The seed
+  initContainer must still run first (and be an initContainer, not a Job) to populate the volume.
 - **The quiz reads its cards once, at startup.** Editing a deck on the volume does nothing until
   `kubectl -n platform rollout restart deploy/quiz`.
 

@@ -23,7 +23,7 @@ cd "$(dirname "$0")/.."
 echo "==> Colima (the Docker runtime VM)"
 if ! colima status &>/dev/null; then
   # 2 CPU / 4 GiB is Colima's default and is not enough to hold a K8s control plane plus
-  # ingress-nginx plus the stack. The VM is also still running the compose site, so leave it room.
+  # ingress-nginx plus the stack.
   colima start --cpu 8 --memory 16
 else
   echo "    already running"
@@ -31,7 +31,7 @@ fi
 
 echo "==> minikube"
 if ! minikube status &>/dev/null || ! docker ps --format '{{.Names}}' | grep -qx minikube; then
-  # Sized to leave roughly half the VM to the compose containers sharing it.
+  # Sized to leave roughly half the VM to its own overhead and image builds.
   # This may exit non-zero with "apiserver healthz never reported healthy" — that is the kubeconfig
   # problem in (1), not a broken cluster, and the repoint below is what fixes it.
   minikube start --driver=docker --cpus=4 --memory=8g || echo "    (start reported an error; repointing kubeconfig before believing it)"
