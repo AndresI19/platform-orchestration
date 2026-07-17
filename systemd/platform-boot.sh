@@ -83,11 +83,11 @@ desktop_notify() {
 
 fail() {
   trap - ERR   # the notifiers below must not re-enter this handler
-  local secs=$(( $(date +%s) - STARTED_AT ))
+  local elapsed=$(( $(date +%s) - STARTED_AT ))
   discord_notify "❌ Platform boot FAILED" \
-    "**$(hostname)** — failed during **${STEP}** after ${secs}s.
+    "**$(hostname)** — failed during **${STEP}** after ${elapsed}s.
 The site is likely still down. Logs: \`journalctl --user -u platform -b\`" 15548997  # red
-  desktop_notify "Platform boot failed" "Failed during ${STEP} after ${secs}s — the site is still down." critical 15
+  desktop_notify "Platform boot failed" "Failed during ${STEP} after ${elapsed}s — the site is still down." critical 15
 }
 trap fail ERR
 
@@ -124,11 +124,11 @@ echo "    docker ready"
 # namespace, so from the host every kubectl call hangs. Colima forwards the node's published port out,
 # and Docker REASSIGNS that port on every container start, so re-read it each boot. See k8s/README.md.
 repoint_kubeconfig() {
-  local port
-  port="$(docker port minikube 8443 2>/dev/null | head -1 | sed 's/.*://')"
-  [[ -n "$port" ]] || return 1
-  kubectl config set-cluster minikube --server="https://127.0.0.1:${port}" >/dev/null
-  echo "    apiserver -> https://127.0.0.1:${port}"
+  local apiserver_port
+  apiserver_port="$(docker port minikube 8443 2>/dev/null | head -1 | sed 's/.*://')"
+  [[ -n "$apiserver_port" ]] || return 1
+  kubectl config set-cluster minikube --server="https://127.0.0.1:${apiserver_port}" >/dev/null
+  echo "    apiserver -> https://127.0.0.1:${apiserver_port}"
 }
 node_running() { docker ps --format '{{.Names}}' | grep -qx minikube; }
 apiserver_answers() { kubectl --request-timeout=10s get --raw /healthz &>/dev/null; }

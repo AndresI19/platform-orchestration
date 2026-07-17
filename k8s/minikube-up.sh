@@ -36,9 +36,9 @@ fi
 
 echo "==> Repointing kubeconfig at the forwarded apiserver port"
 # `docker port` is asked fresh every run precisely because this port is not stable across restarts.
-PORT="$(docker port minikube 8443 | head -1 | sed 's/.*://')"
-kubectl config set-cluster minikube --server="https://127.0.0.1:${PORT}" >/dev/null
-echo "    apiserver -> https://127.0.0.1:${PORT}"
+APISERVER_PORT="$(docker port minikube 8443 | head -1 | sed 's/.*://')"
+kubectl config set-cluster minikube --server="https://127.0.0.1:${APISERVER_PORT}" >/dev/null
+echo "    apiserver -> https://127.0.0.1:${APISERVER_PORT}"
 kubectl get nodes
 
 echo "==> ingress addon"
