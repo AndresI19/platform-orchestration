@@ -1,49 +1,33 @@
 #!/usr/bin/env bash
 # Seal, inspect, and recover the platform's secrets.
 #
-# ---------------------------------------------------------------------------------------------
-# READ THIS FIRST, because it is the thing people get wrong about Sealed Secrets:
+# READ THIS FIRST — the thing people get wrong about Sealed Secrets: there is no "fetch the secret and
+# inject it into a Secret" step, and this script provides none. The sealed-secrets controller ALREADY
+# materialises a real Kubernetes Secret from each committed SealedSecret at apply time
+# (`kubectl -n platform get secrets` lists them today). A Helm chart that needs a credential just
+# references one by name — `existingSecret` / `existingSecretName` / `envFrom`. (Unlike Vault, which
+# pulls at RUNTIME; Sealed Secrets pushes in at APPLY time.)
 #
-# There is no "fetch the secret and inject it into a Secret object" step, and this script does not
-# provide one. The sealed-secrets controller ALREADY materialises a real Kubernetes Secret from each
-# committed SealedSecret at apply time. `kubectl -n platform get secrets` lists them today.
-#
-# So a Helm chart that needs a credential does NOT need anything fetched. It references the Secret
-# that already exists, by name — nearly every chart exposes this as `existingSecret` /
-# `existingSecretName` / `envFrom`. Point it at one of ours, or seal a new one for it with
-# `seal` below. (That is the difference from HashiCorp Vault, where an agent or CSI driver pulls
-# secrets at RUNTIME. Sealed Secrets pushes them in at APPLY time.)
-#
-# THE SCOPING TRAP. Our SealedSecrets are strict-scoped, meaning each is cryptographically bound to
-# BOTH its namespace and its name. Applying k8s/bootstrap/sealed-vmcp-db.yaml into a namespace other than
-# `platform` does not fail with a permissions error you can grant your way out of — the controller
-# simply cannot decrypt it, because the namespace is part of what was encrypted. A chart installed
-# into a new namespace needs its OWN seal:
-#
+# THE SCOPING TRAP: our SealedSecrets are strict-scoped, cryptographically bound to BOTH namespace and
+# name. Applying sealed-vmcp-db.yaml into a namespace other than `platform` does not fail with a
+# grantable permission error — the controller simply cannot decrypt it (the namespace is part of what
+# was encrypted). A chart in a new namespace needs its OWN seal:
 #     ./k8s/secrets.sh seal grafana-admin -n monitoring \
 #         -o charts/grafana/sealed-grafana-admin.yaml \
 #         admin-user=admin admin-password=@GRAFANA_PASSWORD
 #
-# ---------------------------------------------------------------------------------------------
 # Usage
-#
 #   seal <name> [-n NS] [-o FILE] KEY=VALUE | KEY=@ENV_VAR ...
-#       Seals a new SealedSecret. KEY=@ENV_VAR reads the value from .env instead of the command
-#       line, so credentials never land in your shell history. Defaults: -n platform,
-#       -o k8s/bootstrap/sealed-<name>.yaml.
-#
+#       Seal a new SealedSecret. KEY=@ENV_VAR reads from .env (not argv), so credentials stay out of
+#       shell history. Defaults: -n platform, -o k8s/bootstrap/sealed-<name>.yaml.
 #   show <name> [-n NS]
-#       Prints the LIVE Secret's decoded values. This reads the cluster, not the sealed file — and
-#       it is the only way to recover the Postgres password, which by design has no plaintext copy
-#       on disk (it was generated, rotated with ALTER USER, and sealed). Values go to stdout only.
-#
+#       Print the LIVE Secret's decoded values (reads the cluster, not the sealed file) — the only way
+#       to recover the Postgres password, which by design has no plaintext copy on disk. stdout only.
 #   recover <sealed-file> [--key FILE]
-#       Disaster recovery: decrypts a committed sealed file using the backed-up MASTER KEY, with no
-#       cluster involved. This is what you use when minikube is gone. It reads your master private
-#       key, so do not run it casually or on a shared machine.
-#
+#       Disaster recovery: decrypt a committed sealed file with the backed-up MASTER KEY, no cluster.
+#       Reads your master private key — do not run it casually or on a shared machine.
 #   list
-#       Shows every SealedSecret and the Secret it produced.
+#       Show every SealedSecret and the Secret it produced.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -81,8 +65,8 @@ cmd_seal() {
   [ ${#args[@]} -gt 0 ] || die "no KEY=VALUE pairs given"
   [ -n "$out" ] || out="k8s/bootstrap/sealed-${name}.yaml"
 
-  # --dry-run: the plaintext Secret is only ever a stream on a pipe. It is never applied, and never
-  # written to disk — the only artefact is the encrypted output.
+  # --dry-run: the plaintext Secret is only ever a pipe stream — never applied, never on disk; the
+  # only artefact is the encrypted output.
   kubectl create secret generic "$name" -n "$NS" --dry-run=client -o yaml "${args[@]}" \
     | kubeseal --format yaml --controller-namespace "$CONTROLLER_NS" --scope strict \
     > "$out"
@@ -128,5 +112,5 @@ case "${1:-}" in
   show)    shift; cmd_show "$@" ;;
   recover) shift; cmd_recover "$@" ;;
   list)    shift; cmd_list "$@" ;;
-  *) sed -n '28,50p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '19,30p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

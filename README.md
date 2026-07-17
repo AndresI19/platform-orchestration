@@ -123,13 +123,12 @@ both ends of the trip to Discord and to the desktop:
 | **Failure** | ❌ which step failed, and the `journalctl` line to run | urgency=critical |
 
 The two channels are not equally reliable, and the script leans on the difference. Discord is
-reachable as soon as the network is. The desktop toast needs `org.freedesktop.Notifications`, owned
-by gnome-shell — which under linger does not exist yet when the machine boots, so `platform-boot.sh`
-waits up to 2 minutes for a session to appear and sends the opening toast in the background rather
-than making the site wait for a human to log in. **Discord is the channel that will actually deliver
-a boot message.** Set `DISCORD_WEBHOOK_URL` in `.env` (or `PLATFORM_BOOT_WEBHOOK_URL` to send boot
-alerts somewhere other than the home page's greeting channel); with neither set, the script logs and
-carries on. A notification failure never fails a boot.
+reachable as soon as the network is; the desktop toast needs `org.freedesktop.Notifications` (owned by
+gnome-shell), which under linger does not exist yet at boot, so `platform-boot.sh` waits up to 2
+minutes for a session and backgrounds the opening toast rather than making the site wait for a login.
+**Discord is the channel that actually delivers a boot message.** Set `DISCORD_WEBHOOK_URL` in `.env`
+(or `PLATFORM_BOOT_WEBHOOK_URL` to route boot alerts off the home page's greeting channel); with
+neither set the script logs and carries on. A notification failure never fails a boot.
 
 ## Dev environment
 

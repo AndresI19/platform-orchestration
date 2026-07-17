@@ -44,13 +44,13 @@ namespace. This is a description of what exists, not a plan.
 ```
 
 > ▽ **The FVT traffic runner is no longer in the cluster.** It used to be a `fvt-traffic` Deployment
-> that dialled `vmcp` over cluster DNS. It now runs on the **host** (a compose service under
-> platform-cicd) and reaches the gateway through the **public** API — `https://api-andres.project-platform.me`,
-> in the front door with every other visitor. Two things forced the move: vMCP now *verifies* JWTs, so
-> the runner has to sign in to `platform-auth` for a real token like any client (an in-cluster forgery
-> was silently rejected); and exercising the same public path a real user takes is a better smoke test
-> than an internal shortcut. It authenticates as the `fvt-runner` account and its `FVT_CODE` lives in
-> the host's `.env`, not a cluster Secret.
+> dialling `vmcp` over cluster DNS; it now runs on the **host** (a compose service under platform-cicd)
+> and reaches the gateway through the **public** API (`https://api-andres.project-platform.me`), in the
+> front door with every visitor. Two things forced the move: vMCP now *verifies* JWTs, so the runner
+> signs in to `platform-auth` for a real token like any client (an in-cluster forgery was rejected);
+> and exercising the same public path a real user takes is a better smoke test than an internal
+> shortcut. It authenticates as `fvt-runner`, and its `FVT_CODE` lives in the host's `.env`, not a
+> cluster Secret.
 
 ---
 

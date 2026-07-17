@@ -69,10 +69,10 @@ IP (`192.168.49.2:8443`) into kubeconfig.
 `systemd/platform-boot.sh` and `k8s/minikube-up.sh` already handle all of this.
 
 A corollary that costs six minutes if you miss it: **`minikube status` is not a usable health gate
-here.** It probes that same unroutable IP, so it reports the cluster unhealthy even while the site is
-serving — and code that gates `minikube start` on it will start an already-healthy cluster, which then
-sits through the full `apiserver healthz never reported healthy` timeout before giving up. Gate on
-`docker ps` + a `kubectl get --raw /healthz` after the repoint, as `platform-boot.sh` does.
+here.** It probes that same unroutable IP, reporting the cluster unhealthy even while the site serves —
+so code gating `minikube start` on it starts an already-healthy cluster, which sits through the full
+`apiserver healthz never reported healthy` timeout. Gate on `docker ps` + `kubectl get --raw /healthz`
+after the repoint, as `platform-boot.sh` does.
 
 **2. A ConfigMap change does not restart the pods that read it.** `platform-config` reaches the apps
 as *environment variables*, which are read once at container start. After changing it:

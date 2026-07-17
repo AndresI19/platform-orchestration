@@ -1,21 +1,16 @@
 #!/usr/bin/env bash
 # Brings the platform up on minikube, from a cold boot, idempotently.
 #
-# This exists because two steps on this box are NOT what the minikube docs tell you to do, and both
-# fail in ways that look like something else. See k8s/README.md for the long version; the short one:
-#
-#   1. kubeconfig points at an unroutable IP. Docker here is not a native daemon — it lives inside a
-#      Colima QEMU VM. minikube sees a unix socket, concludes Docker is local, and writes the node's
-#      bridge address (192.168.49.2:8443) into kubeconfig. That address exists only inside the VM's
-#      network namespace, so every kubectl call from the host hangs and `minikube start` itself dies
-#      with "apiserver healthz never reported healthy" — even though the control plane is fine.
-#      The fix is to point kubeconfig at the port Colima forwards out to the host instead. That port
-#      is assigned by Docker at container-create time, so it CHANGES on every `minikube start` —
-#      which is why this is a script and not a one-time note.
-#
-#   2. `minikube docker-env` is unusable, for the same reason: it hands out DOCKER_HOST pointing at
-#      that same dead IP. So images are built with Colima's Docker and side-loaded into the node
-#      (deploy.sh does this via docker save | minikube cp | docker load).
+# This exists because two steps on this box are NOT what the minikube docs say, and both fail looking
+# like something else. See k8s/README.md for the long version; the short one:
+#   1. kubeconfig points at an unroutable IP. Docker here is not native — it lives in a Colima QEMU VM.
+#      minikube sees a unix socket, assumes Docker is local, and writes the node's bridge address
+#      (192.168.49.2:8443), reachable only inside the VM. So every kubectl call from the host hangs and
+#      `minikube start` dies with "apiserver healthz never reported healthy" though the control plane
+#      is fine. Fix: point kubeconfig at the port Colima forwards out — which Docker reassigns on every
+#      `minikube start`, so this is a script, not a one-time note.
+#   2. `minikube docker-env` is unusable, same reason: DOCKER_HOST points at that dead IP. So images
+#      are built with Colima's Docker and side-loaded (deploy.sh: docker save | minikube cp | docker load).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

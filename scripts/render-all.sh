@@ -6,13 +6,13 @@
 # deploy/<name>.values.yaml. This renders all of them the same way a deploy does, so that "what CI
 # scans" and "what gets deployed" cannot drift apart.
 #
-# WHY THIS EXISTS AS A SCRIPT rather than a few lines in ci.yml: it is used by two CI jobs (the Trivy
-# config scan and the kubeconform schema check) and is the fastest local check that a chart edit
-# renders at all — `./scripts/render-all.sh /tmp/out`. One renderer, three callers.
+# WHY A SCRIPT, not a few lines in ci.yml: two CI jobs use it (the Trivy config scan and the
+# kubeconform schema check), and it is the fastest local check that a chart edit renders at all. One
+# renderer, three callers.
 #
-# It replaced render-parity.sh, which proved the split charts rendered identically to the umbrella
-# chart. That gate did its job: the split is deployed and serving, and the umbrella is gone — there is
-# no longer a second thing to be at parity WITH.
+# It replaced render-parity.sh, which proved the split charts rendered identically to the umbrella.
+# That gate did its job: the split is deployed and serving, the umbrella is gone — nothing left to be
+# at parity WITH.
 #
 # WHERE THE SERVICE VALUES COME FROM. Each is owned by the repo that ships the component, so this
 # needs those repos on disk. Two layouts, both supported, because there are two callers:

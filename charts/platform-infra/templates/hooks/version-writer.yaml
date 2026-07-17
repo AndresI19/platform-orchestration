@@ -1,32 +1,28 @@
 {{- /*
-Writes platform-version.json onto the content PVC — the platform's OWN version (the orchestration repo
-ships no image, so its version cannot ride in one). home serves this at /version and /api/versions,
-read per request, so a redeploy updates the reported version with no rollout of home.
+Writes platform-version.json onto the content PVC — the platform's OWN version (this repo ships no
+image, so its version cannot ride in one). home serves it at /version and /api/versions per request,
+so a redeploy updates the reported version with no rollout of home.
 
-Only `platform` is written now. Under the umbrella chart this Job also rendered a `components` map from
-every app's values, but home never read it — `versions.ts` reads only `spec.platform` and gets each
-component's version from a LIVE fan-out to the services' own /version endpoints. With the apps split
-into their own releases, this infra release no longer knows their versions, and it does not need to.
+Only `platform` is written now. The umbrella chart also rendered a `components` map, but home never
+read it — versions.ts reads only spec.platform and gets each component's version from a LIVE fan-out
+to the services' /version endpoints. Split into their own releases, this infra release no longer knows
+their versions and doesn't need to.
 
-This is a Helm HOOK, not a normal resource, and that is the whole design:
-  * The platform version is resolved into VALUES before the deploy (k8s/deploy.sh --set), so the
-    release is versioned and `helm get values` shows exactly what is live.
+A Helm HOOK, not a normal resource, and that is the design:
+  * The platform version resolves into VALUES before the deploy (k8s/deploy.sh --set), so the release
+    is versioned and `helm get values` shows what is live.
   * The Job renders the JSON from that value, so it can never disagree with what was deployed.
-  * It fires on post-rollback too, so `helm rollback platform-infra` rewrites the file to the
-    rolled-back version.
+  * It fires on post-rollback too, so `helm rollback platform-infra` rewrites the file.
+Writing needs a pod (the volume only exists in the cluster), so the Job mounts the PVC read-WRITE;
+busybox because it is already in the node and needs no pull.
 
-Writing needs a pod because the volume only exists in the cluster, so this Job mounts the PVC
-read-WRITE. busybox is used because it is already in the node and needs no pull.
-
-WHAT PROTECTS THIS FILE. It used to be the mount: home held the volume read-only and simply could not
-rewrite the record of what is deployed. That is no longer true — home mounts /content read-write so
-its admin upload route can replace the résumé without a rollout (project-platform, src/server/content.ts).
-Nothing at the filesystem layer stops it now: the volume is owned 1000:1000, home runs as uid 1000,
-and POSIX takes rename/unlink permission from the DIRECTORY's write bit rather than the target file's
-owner. What keeps this file the deploy pipeline's alone is home's ALLOWLIST, which admits exactly
-resume.pdf and cards/<name>.yaml and is tested against precisely this path. If that allowlist ever
-widens, this file loses its last protection — so it is named here, where the next reader of this
-comment will be looking.
+WHAT PROTECTS THIS FILE. It used to be the mount — home held the volume read-only and could not rewrite
+the record of what is deployed. No longer: home mounts /content read-write for its admin résumé-upload
+route (project-platform, src/server/content.ts), and nothing at the filesystem layer stops it (volume
+owned 1000:1000, home runs uid 1000, and POSIX takes rename/unlink permission from the DIRECTORY's
+write bit, not the target file's owner). What keeps this file the deploy's alone is home's ALLOWLIST —
+exactly resume.pdf and cards/<name>.yaml, tested against precisely this path. Widen it and this file
+loses its last protection, so it is named here where the next reader will look.
 */ -}}
 {{- $spec := dict "platform" .Values.platform.version "deployedAt" (now | date "2006-01-02T15:04:05Z07:00") -}}
 apiVersion: batch/v1
@@ -49,10 +45,9 @@ spec:
     spec:
       restartPolicy: Never
       terminationGracePeriodSeconds: 0
-      # Same non-root identity home and quiz use to write this very PVC (uid/gid 1000, fsGroup 1000) —
-      # the content volume is owned 1000:1000, so the writer needs no root to write to it. Hardened to
-      # match every other workload: non-root, read-only root filesystem (it only writes to the mounted
-      # /content, never its own rootfs), no privilege escalation, all capabilities dropped.
+      # Same non-root identity home/quiz use to write this PVC (uid/gid 1000, fsGroup 1000; volume
+      # owned 1000:1000, so no root needed). Hardened like every workload: read-only rootfs (it writes
+      # only the mounted /content), no privilege escalation, all capabilities dropped.
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -68,10 +63,10 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-          # The spec is rendered by Helm from values (single-line toJson — our version never contains a
-          # single quote, so single-quoting is safe). 0644 because everything on this volume is public
-          # content; the mode is ASSERTED, not `test -r`, so a regression that leaves the file
-          # unreadable by home fails the deploy loudly rather than serving null.
+          # Spec rendered by Helm from values (single-line toJson — our version never contains a single
+          # quote, so single-quoting is safe). 0644 because this volume is public content; the mode is
+          # ASSERTED, not `test -r`, so a regression leaving it unreadable by home fails the deploy
+          # loudly rather than serving null.
           command:
             - sh
             - -c
