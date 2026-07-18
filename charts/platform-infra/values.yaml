@@ -36,6 +36,10 @@ nginx:
 
 # The two Postgres servers. PVCs are bootstrap (not the chart); these own the Deployment + Service,
 # and platform-db additionally seeds two databases via init.sql on an empty volume.
+# One image serves both servers AND the root fix-perms initContainer (which reuses it to avoid a
+# second pull) — pinned once here so a version bump lands in a single place.
+postgres:
+  image: postgres:16
 databases:
   platform-db:
     pvcName: platform-db

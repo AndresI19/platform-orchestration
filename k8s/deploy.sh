@@ -39,7 +39,7 @@ OVERLAY="${1:-}" # pass "public" to layer the public front door (values-public.y
 # port changes on every `minikube start`, so re-derive it. Skips quietly if minikube isn't up.
 if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx minikube; then
   APISERVER_PORT="$(docker port minikube 8443 2>/dev/null | head -1 | sed 's/.*://')"
-  if [ -n "${APISERVER_PORT:-}" ]; then
+  if [ -n "$APISERVER_PORT" ]; then
     kubectl config set-cluster minikube --server="https://127.0.0.1:${APISERVER_PORT}" >/dev/null 2>&1 || true
     echo "==> kubeconfig -> https://127.0.0.1:${APISERVER_PORT}"
   fi
@@ -104,6 +104,11 @@ content_tag() {
   fi
 }
 
+# Does the minikube node's OWN docker daemon already hold this image? Its daemon is separate from
+# Colima's, so this is `minikube ssh`, not a host `docker` call — asked both to skip a redundant
+# side-load and to prove one landed.
+image_in_cluster() { minikube ssh -- "docker image inspect $1 >/dev/null 2>&1"; }
+
 # Get the image into the cluster's OWN docker daemon (the minikube node runs its own, separate from
 # Colima's). `minikube image load` is NOT used: it silently no-ops on an existing tag — see above.
 push_to_cluster() {
@@ -113,7 +118,7 @@ push_to_cluster() {
   minikube cp "$tar" /home/docker/img.tar >/dev/null
   minikube ssh -- "docker load -i /home/docker/img.tar >/dev/null && rm -f /home/docker/img.tar"
   rm -f "$tar"
-  minikube ssh -- "docker image inspect $img >/dev/null 2>&1" \
+  image_in_cluster "$img" \
     || { echo "FATAL: $img is not in the cluster after load" >&2; exit 1; }
 }
 
@@ -157,22 +162,21 @@ for app in "${APPS[@]}"; do
   args=(--build-arg "VERSION=${VERSION[$app]}"
         --build-arg "GIT_SHA=$(git -C "$repo" rev-parse --short HEAD)"
         --build-arg "BUILD_DATE=${BUILD_DATE}")
-  case "$app" in
-    quiz) docker build -q -t "$img" "${args[@]}" --build-arg BASE_PATH=/cloud-developer-quiz/ "$repo" >/dev/null ;;
-    *) docker build -q -t "$img" "${args[@]}" "$repo" >/dev/null ;;
-  esac
+  # quiz is served under a sub-path, so it alone needs a BASE_PATH; every app builds the same way otherwise.
+  [ "$app" = quiz ] && args+=(--build-arg BASE_PATH=/cloud-developer-quiz/)
+  docker build -q -t "$img" "${args[@]}" "$repo" >/dev/null
   echo "    $img"
 done
 
 echo "==> Publishing into the cluster"
 for app in "${APPS[@]}"; do
   img="platform-${app}:${TAG[$app]}"
-  if minikube ssh -- "docker image inspect $img >/dev/null 2>&1"; then
+  if image_in_cluster "$img"; then
     echo "    $img (already in cluster)"
-  else
-    echo "    $img"
-    push_to_cluster "$img"
+    continue
   fi
+  echo "    $img"
+  push_to_cluster "$img"
 done
 
 # Deploy: six releases, versions resolved into --set values before each upgrade, so each release is the

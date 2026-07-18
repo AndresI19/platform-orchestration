@@ -12,7 +12,7 @@ exactly the version being deployed.
 {{- $name := .name -}}
 {{- $app := .app -}}
 {{- $ns := .root.Release.Namespace -}}
-{{- $img := printf "%s:%s" $app.image.repo $app.image.tag -}}
+{{- $image := printf "%s:%s" $app.image.repo $app.image.tag -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,7 +41,7 @@ spec:
       initContainers:
         {{- range . }}
         - name: {{ .name }}
-          image: {{ .image | default $img }}
+          image: {{ .image | default $image }}
           imagePullPolicy: IfNotPresent
           securityContext:
             {{- include "platform.containerSecurity" (dict) | nindent 12 }}
@@ -56,7 +56,7 @@ spec:
       {{- end }}
       containers:
         - name: {{ $name }}
-          image: {{ $img }}
+          image: {{ $image }}
           imagePullPolicy: IfNotPresent
           {{- with $app.port }}
           ports: [{ containerPort: {{ . }} }]

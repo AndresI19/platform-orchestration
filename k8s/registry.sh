@@ -18,7 +18,7 @@
 # taking it means `minikube delete`, destroying the sealed-secrets keypair (the only thing that can
 # decrypt every committed sealed-*.yaml). Instead we issue our own CA: docker reads a per-registry CA
 # from /etc/docker/certs.d/<host>:<port>/ca.crt with NO daemon restart and NO cluster recreate.
-set -Eeuo pipefail
+set -euo pipefail   # no ERR trap here, so -E (errtrace) would be inert — matches k8s/minikube-up.sh
 
 export PATH="/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin"
 
@@ -36,7 +36,7 @@ NETWORK="minikube"
 # it does not exist in the VM: a bind mount of it silently resolves to an empty directory — which is
 # how this registry first crash-looped, from /tmp.
 VM_DIR="${PLATFORM_VM_DIR:-$HOME/git-workspace/claude-workspace/.platform-vm}"
-CERTS="$VM_DIR/certs"
+CERTS_DIR="$VM_DIR/certs"
 # The CA's PRIVATE KEY lives OUTSIDE the mount, on purpose: anything that can read it can mint a
 # trusted cert for any host on this machine. The registry needs its own key and the CA cert, never
 # the CA key.
@@ -49,50 +49,50 @@ say() { echo "    $*"; }
 # created ONCE and reused. Only the server cert is reissued, and only when missing, expiring, or no
 # longer signed by our CA.
 ensure_certs() {
-  mkdir -p "$CERTS" "$CA_DIR"
+  mkdir -p "$CERTS_DIR" "$CA_DIR"
   chmod 700 "$CA_DIR"
 
-  if [ ! -s "$CA_DIR/ca.key" ] || [ ! -s "$CERTS/ca.crt" ]; then
+  if [ ! -s "$CA_DIR/ca.key" ] || [ ! -s "$CERTS_DIR/ca.crt" ]; then
     say "issuing a new CA (10y — a cert that quietly expires breaks every pull on a random Tuesday)"
     openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
-      -keyout "$CA_DIR/ca.key" -out "$CERTS/ca.crt" -subj "/CN=platform-registry-ca" 2>/dev/null
-    rm -f "$CERTS/registry.crt"   # a new CA means the old server cert is worthless
+      -keyout "$CA_DIR/ca.key" -out "$CERTS_DIR/ca.crt" -subj "/CN=platform-registry-ca" 2>/dev/null
+    rm -f "$CERTS_DIR/registry.crt"   # a new CA means the old server cert is worthless
   fi
 
   # Reissue only if absent, expiring within 30 days, or not signed by the CA we hold.
-  if [ -s "$CERTS/registry.crt" ] \
-     && openssl x509 -checkend 2592000 -noout -in "$CERTS/registry.crt" >/dev/null 2>&1 \
-     && openssl verify -CAfile "$CERTS/ca.crt" "$CERTS/registry.crt" >/dev/null 2>&1; then
+  if [ -s "$CERTS_DIR/registry.crt" ] \
+     && openssl x509 -checkend 2592000 -noout -in "$CERTS_DIR/registry.crt" >/dev/null 2>&1 \
+     && openssl verify -CAfile "$CERTS_DIR/ca.crt" "$CERTS_DIR/registry.crt" >/dev/null 2>&1; then
     say "server certificate present and valid"
   else
     say "issuing the registry's server certificate"
     # CSR, SAN config and openssl's serial file are signing ARTEFACTS — kept in the CA directory, not
-    # $CERTS. $CERTS is a window into the VM, and only the three files something over there reads
+    # $CERTS_DIR. $CERTS_DIR is a window into the VM, and only the three files something over there reads
     # belong there: registry.crt + registry.key (the registry container) and ca.crt (the VM-side cp
     # that installs trust).
-    openssl req -newkey rsa:4096 -nodes -keyout "$CERTS/registry.key" \
+    openssl req -newkey rsa:4096 -nodes -keyout "$CERTS_DIR/registry.key" \
       -out "$CA_DIR/registry.csr" -subj "/CN=registry" 2>/dev/null
     # subjectAltName is MANDATORY: Go (both docker and the registry) ignores CN entirely, and a CN-only
     # cert fails with an error that says nothing about SANs.
     printf 'subjectAltName = DNS:registry, DNS:localhost, IP:127.0.0.1\nextendedKeyUsage = serverAuth\n' \
       > "$CA_DIR/san.cnf"
-    openssl x509 -req -in "$CA_DIR/registry.csr" -CA "$CERTS/ca.crt" -CAkey "$CA_DIR/ca.key" \
+    openssl x509 -req -in "$CA_DIR/registry.csr" -CA "$CERTS_DIR/ca.crt" -CAkey "$CA_DIR/ca.key" \
       -CAcreateserial -CAserial "$CA_DIR/ca.srl" \
-      -out "$CERTS/registry.crt" -days 3650 -sha256 -extfile "$CA_DIR/san.cnf" 2>/dev/null
+      -out "$CERTS_DIR/registry.crt" -days 3650 -sha256 -extfile "$CA_DIR/san.cnf" 2>/dev/null
     rm -f "$CA_DIR/registry.csr"
   fi
 
   # Sweep anything else that drifted into the mount: this directory's value is entirely in what is NOT in it.
-  find "$CERTS" -maxdepth 1 -type f \
+  find "$CERTS_DIR" -maxdepth 1 -type f \
     ! -name ca.crt ! -name registry.crt ! -name registry.key -delete 2>/dev/null || true
 
-  chmod 600 "$CA_DIR/ca.key" "$CERTS/registry.key"
-  chmod 644 "$CERTS/ca.crt" "$CERTS/registry.crt"
+  chmod 600 "$CA_DIR/ca.key" "$CERTS_DIR/registry.key"
+  chmod 644 "$CERTS_DIR/ca.crt" "$CERTS_DIR/registry.crt"
 }
 
 # --- 2. the registry container -----------------------------------------------------------------
 registry_serving() {
-  docker run --rm --network "$NETWORK" -v "$CERTS":/certs:ro --entrypoint curl \
+  docker run --rm --network "$NETWORK" -v "$CERTS_DIR":/certs:ro --entrypoint curl \
     curlimages/curl:latest -sf --max-time 5 --cacert /certs/ca.crt "https://${REG_HOST}/v2/" \
     >/dev/null 2>&1
 }
@@ -111,7 +111,7 @@ ensure_registry() {
   docker rm -f "$REG_NAME" >/dev/null 2>&1 || true
   docker run -d --name "$REG_NAME" --network "$NETWORK" --ip "$REG_IP" --restart unless-stopped \
     -v registry-data:/var/lib/registry \
-    -v "$CERTS":/certs:ro \
+    -v "$CERTS_DIR":/certs:ro \
     -e REGISTRY_HTTP_ADDR="0.0.0.0:${REG_PORT}" \
     -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/registry.crt \
     -e REGISTRY_HTTP_TLS_KEY=/certs/registry.key \
@@ -126,7 +126,7 @@ ensure_registry() {
 # --- 3. trust ----------------------------------------------------------------------------------
 # Compared by fingerprint, not presence: a stale CA from a previous generation is worse than none —
 # it fails with the same error while looking installed.
-ca_fingerprint() { openssl x509 -in "$CERTS/ca.crt" -noout -fingerprint -sha256 | cut -d= -f2; }
+ca_fingerprint() { openssl x509 -in "$CERTS_DIR/ca.crt" -noout -fingerprint -sha256 | cut -d= -f2; }
 
 ensure_trust_vm() {
   local want; want="$(ca_fingerprint)"
@@ -138,7 +138,7 @@ ensure_trust_vm() {
   else
     say "installing the CA into the colima VM (it is the daemon that PUSHES)"
     colima ssh -- sudo mkdir -p "/etc/docker/certs.d/${REG_HOST}"
-    colima ssh -- sudo cp "$CERTS/ca.crt" "/etc/docker/certs.d/${REG_HOST}/ca.crt"
+    colima ssh -- sudo cp "$CERTS_DIR/ca.crt" "/etc/docker/certs.d/${REG_HOST}/ca.crt"
   fi
 
   # Colima's daemon isn't on minikube's network, so docker's embedded DNS never serves it the name.
@@ -159,7 +159,7 @@ ensure_trust_node() {
   fi
   say "installing the CA into the minikube node (it is the daemon that PULLS for the kubelet)"
   minikube ssh -- "sudo mkdir -p '/etc/docker/certs.d/${REG_HOST}'"
-  minikube cp "$CERTS/ca.crt" /tmp/registry-ca.crt >/dev/null
+  minikube cp "$CERTS_DIR/ca.crt" /tmp/registry-ca.crt >/dev/null
   # `sudo` covers the rm too: minikube cp lands the file root-owned, so an unprivileged rm fails
   # "Operation not permitted" — and as the last command in the chain, that would fail the whole boot
   # AFTER trust was already installed.
