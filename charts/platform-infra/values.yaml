@@ -48,6 +48,7 @@ databases:
     initSql: |
       CREATE DATABASE auth;
       CREATE DATABASE quiz;
+      CREATE DATABASE jobsearch;
   vmcp-db:
     pvcName: vmcp-db
     secretName: vmcp-db
