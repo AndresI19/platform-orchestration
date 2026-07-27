@@ -1,0 +1,28 @@
+# Secrets for the job-searcher service, mounted as READ-ONLY FILES at /etc/.secrets (the data-key
+# names ARE the filenames). Ciphertext only — strict-scoped to platform/job-searcher-secrets.
+#
+#   apify-token        — sealed. The LinkedIn-ingest Apify credential.
+#   anthropic-api-key  — NOT YET SET. The service runs JUDGE_BACKEND=api in-cluster; a real (admin)
+#                        run will fail at judge time until this key is added. The open mock/preview
+#                        is unaffected. To add it (merges into this SealedSecret without disturbing
+#                        apify-token), from platform-orchestration/ with the key in a temp env-file:
+#
+#     printf 'anthropic-api-key=%s\n' "$YOUR_KEY" > /tmp/k.env
+#     kubectl create secret generic job-searcher-secrets -n platform --from-env-file=/tmp/k.env \
+#       --dry-run=client -o yaml \
+#       | kubeseal --format yaml --controller-namespace kube-system --scope strict \
+#           --merge-into k8s/bootstrap/sealed-job-searcher.yaml
+#     rm -f /tmp/k.env
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: job-searcher-secrets
+  namespace: platform
+spec:
+  encryptedData:
+    apify-token: AgC3IiAUgZfPQp5yQI5B3GJv0WV82LsuIQdevWGQLlml0N52aP0JwUql+NKTshumfRa4BVPBhztmL27CVmImujMIoJCkCYlvAmD92iKvKvxo5hqiNdHYRlpEUsm5xydPYAib3o2/m0gN21ZsYikzBeqrkeOtc1fOZTFJwBdA5kqdjDUhsfIeoFjARBa/sVdB1RSEQfr2ra9MRPCatxhC17uUUYweSDJPnMpJ1ir1lo2gvpTCcFj/PhcMM7S2zrueOSSVyi4OqnsNu3qUjIQMc6l/KnkIwFP6xjPXslCegkycRbf+OIF5ah4O2tYF3v96Iv0ZX5tcGloK+IxUkw7JbdgajjlH5PPPB2ER5U8jtJpUUzPDW1oATTUkVI6CvMPB8I3pfTtMZXeYNPjtVeDFs+GG59vmFS7OUrCCNA8dKf2etghRNAzULt1hpNkIZAIe/nEwlr6nW6P671z3CHwnS1Br6QK3oXd7rz59f9A5tTzSwAmEyZzBnr4NY//df6OjKrF6zPRtm/qBRlCDdynwVvwH2nBYFcKdXvmCUl9tSQ6/7IwWs7XeluZrc1ayBMva6fsJg4omdRfBQ6CnRUZ+7FLOwVDiPWBXODoV8/i+4ksJibIaHpFPlfchX2O5+UhPDXldfEhHgG7YU5R9vXvxZ9vfKYpOHFcR/g/A/Cpv+SCcAaoXwqOHexNDr6tSyJ3CRLyeCnYj/xfCdR2kOnMoc/28BGOtflTBah83VaGo1FOf++aD7zJWODZMbuo3AekA
+  template:
+    metadata:
+      name: job-searcher-secrets
+      namespace: platform
