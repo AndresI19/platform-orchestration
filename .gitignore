@@ -2,6 +2,13 @@
 .DS_Store
 .env
 
+# Local agent config. Ignored rather than merely left untracked because
+# component_version() in k8s/deploy.sh counts untracked files
+# (`git ls-files --others --exclude-standard`) as "differs from main" — so a stray
+# file here silently stamps the PLATFORM's own version `-snapshot` forever, with
+# nothing in git to explain why.
+.claude/
+
 # Vendored library subcharts (rebuilt by `helm dependency build`)
 charts/*/charts/
 charts/*/Chart.lock

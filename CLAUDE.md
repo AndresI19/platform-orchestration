@@ -260,10 +260,13 @@ admin from anyone else.)
 
 ## Sharp edges
 
-- **This repo has a private remote** (`AndresI19/platform-orchestration`). The committed `sealed-*.yaml`
-  are safe to publish — they are encrypted — but the gitignored `.env` and the sealed-secrets private
-  key must never be. A security audit (2026-07-13) cleared the history before the first push; the only
+- **This repo is PUBLIC** (`AndresI19/platform-orchestration`) — everything committed here is world
+  readable, so treat every addition as a publication. The committed `sealed-*.yaml` are safe to
+  publish, because they are encrypted; the gitignored `.env` and the sealed-secrets private key must
+  never be. A security audit (2026-07-13) cleared the history before the first push; the only
   plaintext secret ever committed was a since-rotated demo DB password in files deleted at the cutover.
+  This is also why the operational tooling lives in the separate PRIVATE `platform-ops` repo and must
+  not be relocated under this tree: a filesystem boundary keeps them apart, and `.gitignore` would not.
 - **The sealed-secrets private key is the only thing that can decrypt the committed `sealed-*.yaml`
   files.** It is NOT in this repo (verified). Recreate the cluster without a backup of it and the
   sealed secrets are lost permanently.
