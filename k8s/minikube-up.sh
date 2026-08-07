@@ -24,21 +24,31 @@ else
   echo "    already running"
 fi
 
-echo "==> minikube"
-if ! minikube status &>/dev/null || ! docker ps --format '{{.Names}}' | grep -qx minikube; then
-  # Sized to leave roughly half the VM to its own overhead and image builds.
-  # This may exit non-zero with "apiserver healthz never reported healthy" — that is the kubeconfig
-  # problem in (1), not a broken cluster, and the repoint below is what fixes it.
-  minikube start --driver=docker --cpus=4 --memory=8g || echo "    (start reported an error; repointing kubeconfig before believing it)"
-else
-  echo "    already running"
-fi
+# minikube's forwarded apiserver port changes on every start, so kubeconfig is repointed at it each run
+# (`docker port` asked fresh). `minikube status` is NOT a usable gate: it probes the unroutable
+# 192.168.49.2 and reports the cluster down even while it serves, forcing a needless `minikube start`
+# that then sits through a ~6-minute "apiserver healthz never reported healthy" timeout. So gate on what
+# is actually true — the node container is up and the apiserver answers once kubeconfig points at the
+# forwarded port (this mirrors systemd/platform-boot.sh, which was fixed the same way).
+repoint_kubeconfig() {
+  local port; port="$(docker port minikube 8443 2>/dev/null | head -1 | sed 's/.*://')"
+  [[ -n "$port" ]] || return 1
+  kubectl config set-cluster minikube --server="https://127.0.0.1:${port}" >/dev/null
+  echo "    apiserver -> https://127.0.0.1:${port}"
+}
+node_running() { docker ps --format '{{.Names}}' | grep -qx minikube; }
+apiserver_answers() { kubectl --request-timeout=10s get --raw /healthz &>/dev/null; }
 
-echo "==> Repointing kubeconfig at the forwarded apiserver port"
-# `docker port` is asked fresh every run precisely because this port is not stable across restarts.
-APISERVER_PORT="$(docker port minikube 8443 | head -1 | sed 's/.*://')"
-kubectl config set-cluster minikube --server="https://127.0.0.1:${APISERVER_PORT}" >/dev/null
-echo "    apiserver -> https://127.0.0.1:${APISERVER_PORT}"
+echo "==> minikube"
+if node_running && repoint_kubeconfig && apiserver_answers; then
+  echo "    already running"
+else
+  # May exit non-zero with "apiserver healthz never reported healthy" — the unroutable-IP problem in
+  # (1) surfacing as a start failure, not a broken cluster; the repoint below is the actual fix.
+  minikube start --driver=docker --cpus=4 --memory=8g || echo "    (start reported an error; repointing kubeconfig before believing it)"
+  repoint_kubeconfig
+  apiserver_answers || { echo "apiserver still unreachable after repointing kubeconfig" >&2; exit 1; }
+fi
 kubectl get nodes
 
 echo "==> ingress addon"
