@@ -1,6 +1,6 @@
 {{- /*
 The Postgres servers. Their PVCs are bootstrap (k8s/bootstrap/pvcs.yaml) so Helm never risks the
-data — these own the Deployment + Service, and platform-db additionally seeds its two databases via
+data — these own the Deployment + Service, and platform-db additionally seeds its databases via
 an init.sql ConfigMap that Postgres runs ONCE on an empty volume.
 
 Both run as uid 999 (the image's postgres user) with NO fsGroup — fsGroup would recursively make

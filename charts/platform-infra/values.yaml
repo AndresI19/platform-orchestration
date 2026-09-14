@@ -35,7 +35,9 @@ nginx:
   image: nginx:1.27-alpine
 
 # The two Postgres servers. PVCs are bootstrap (not the chart); these own the Deployment + Service,
-# and platform-db additionally seeds two databases via init.sql on an empty volume.
+# and platform-db additionally seeds its databases via init.sql ON AN EMPTY VOLUME ONLY — adding a
+# name below does NOT create it on a running server, which has to be done by hand (CREATE DATABASE).
+# The list is therefore the disaster-recovery record, not the live state.
 # One image serves both servers AND the root fix-perms initContainer (which reuses it to avoid a
 # second pull) — pinned once here so a version bump lands in a single place.
 postgres:
@@ -49,6 +51,7 @@ databases:
       CREATE DATABASE auth;
       CREATE DATABASE quiz;
       CREATE DATABASE jobsearch;
+      CREATE DATABASE fvt;
   vmcp-db:
     pvcName: vmcp-db
     secretName: vmcp-db

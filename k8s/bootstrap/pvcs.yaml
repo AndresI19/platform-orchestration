@@ -19,7 +19,8 @@ spec:
     requests:
       storage: 256Mi
 ---
-# The shared Postgres server's data — two databases (auth, quiz), one owner each. See the chart's
+# The shared Postgres server's data — one database per service (auth, quiz, jobsearch, fvt), all
+# owned by the `platform` role. See the chart's
 # postgres template for why they share a server but not a schema.
 apiVersion: v1
 kind: PersistentVolumeClaim
