@@ -1,0 +1,13 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: home-db
+  namespace: platform
+spec:
+  encryptedData:
+    DATABASE_URL: AgChHdPIy/OzGxs623KVph2OtycQd/ptepbohEj3AggI+f++InEcTX4Cy5FM4rEY6/t8Idls1LX4THM7ze81ryguQnttBNYXPncwhFhPmW6v5HOBR4pFm9BoyruHAZaWixtvi8zYKju8EGNjBdB46GoWphW5f4cwzX7gw+GnM0fpQzz2W/MHzdnzPtUuHaB8L+DesVbM/0A2V/wlKwCJhVqoT1O3mGeZ/i+QnUGH0NzlLmFQpMt1KR7HKZYvEUR5tIGX1EaTI6avJDObV42jPYCORZOXJZMrAUVRMUQdtIudSime5lvY5yjmbl4naEo+iY3MU0lVv4UvYhukFQqCoZCcxHfk4PjCJ6t3HxP8cArRkHu0kVLbtojqiNieAYVKIVT8gnujbjAah2HPJFtiYasTTajsWVxmHWrNkkJy3ixljYiOsoVjhGu4GpGzEgi/36W7DaUpXhZ04cGLH5SNRwkzxl7nFS2jIydA/80BkU6atRVLl6r/19ffc9wA2wL4WUQcVt3c3/X7hracdF/l6tHgRFS5ooIc4o3hGNBYDYSLBRcdMdFj1AGmrLDPET9gXnuAH2bHcAMdgwEgdqaWjNwmPd4jb1SIVPunqRal8Q3Xa7V3SeWm4WM3I4m5+iJYsOBRlPeDbPLVumBUo8V0C5E/X47ygK6lA0c4PxzC6kc7gBcC2FHyCMR0/+XXI7Ga3iWQ1jeT6ZTg/LWGpQN3sMStig6hTHV1ScMH9fy/gkgqpVg97dCPi/HJbOUt2niEubQF9frRUeZiRWWHMk1AEeldVE4Cv2RhqYFYu8EN1OrpjRlG+ZXa
+  template:
+    metadata:
+      name: home-db
+      namespace: platform
